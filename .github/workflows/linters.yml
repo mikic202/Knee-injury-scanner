@@ -9,7 +9,7 @@ on:
 
 jobs:
   check-code-quality:
-    name: python
+    name: code-quality
     runs-on: ubuntu-latest
 
     steps:
