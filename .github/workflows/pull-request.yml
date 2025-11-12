@@ -1,6 +1,6 @@
 name: Code Quality
 on:
-  [pull_request]
+  pull_request:
   push:
     branches:
       - master
