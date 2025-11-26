@@ -19,3 +19,8 @@ dev = [
 lint = [
     "ruff>=0.14.4",
 ]
+
+[tool.uv.workspace]
+members = [
+    "git_submodules/PyAiWrap",
+]
