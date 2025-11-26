@@ -8,6 +8,7 @@ dependencies = [
     "captum>=0.7.0",
     "numpy==2.3.4",
     "pandas==2.2.3",
+    "pyaiwrap",
     "torch>=2.9.0",
 ]
 
@@ -24,3 +25,6 @@ lint = [
 members = [
     "git_submodules/PyAiWrap",
 ]
+
+[tool.uv.sources]
+pyaiwrap = { workspace = true }
