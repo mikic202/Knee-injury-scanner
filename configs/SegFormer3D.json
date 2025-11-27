@@ -13,7 +13,7 @@
     "OUTPUT_TYPE": "standard",
     "SCHEDULER_TYPE": "polywarmup",
     "LOSS_TYPES": ["segmentation"],
-    "RESIZE": [32, 256, 256],
+    "RESIZE": [32, 320, 320],
     "EPOCHS": 200,
     "DIAGRAMS_DATA_PATH": "./diagrams_data",
     "WEIGHTS_PATH": "./weights",
