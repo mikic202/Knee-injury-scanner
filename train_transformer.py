@@ -48,7 +48,7 @@ def createDataLoaders(config):
 
     train_indices, val_indices = train_test_split(
         indices,
-        test_size=0.2,
+        test_size=0.1,
         random_state=42,
         shuffle=True,
         stratify=full_dataset.metadata.iloc[full_dataset.valid_samples]['aclDiagnosis']
