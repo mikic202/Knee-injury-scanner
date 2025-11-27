@@ -1,0 +1,6 @@
+[
+    {
+        "type": "SegFormer3D", 
+        "params": {}
+    }
+]
