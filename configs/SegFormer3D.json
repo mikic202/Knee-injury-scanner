@@ -1,5 +1,5 @@
 {
-    "BATCH_SIZE": 1,
+    "BATCH_SIZE": 4,
     "DATA_PATH": "./data",
     "HYPERPARAMS_ID": "SegFormer3D",
     "ARCHITECTURE_ID": "SegFormer3D",
@@ -13,7 +13,7 @@
     "OUTPUT_TYPE": "standard",
     "SCHEDULER_TYPE": "polywarmup",
     "LOSS_TYPES": ["segmentation"],
-    "RESIZE": [128, 128, 128],
+    "RESIZE": [],
     "EPOCHS": 200,
     "DIAGRAMS_DATA_PATH": "./diagrams_data",
     "WEIGHTS_PATH": "./weights",
