@@ -10,6 +10,10 @@ wheels/
 # data
 data/**
 
+diagrams/**
+diagrams_data/**
+weights/**
+
 configs/**
 
 # Virtual environments

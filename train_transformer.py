@@ -1,4 +1,5 @@
 import argparse
+from pyaiwrap.train import train
 from pyaiwrap.datasets import KneeMRISegmentationDataset
 from pyaiwrap.loss import SegmentationDiceCELoss
 from pyaiwrap.metrics import SegmentationMetrics
@@ -7,6 +8,7 @@ from pyaiwrap.optimizers import createOptimizer
 from pyaiwrap.schedulers import createScheduler
 from pyaiwrap.utils import prepareDevice
 from pyaiwrap.generator import createGenerator
+from pyaiwrap.control import SegmentationControlFunc
 import torch
 from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
@@ -76,7 +78,7 @@ def createDataLoaders(config):
     return train_loader, validation_loader, len(train_dataset), len(validation_dataset)
 
 
-def createGeneratorModel(config, device):
+def createSegmentator(config, device):
     """Create and return the generator model."""
     generator = createGenerator(config=config, device=device)
     total_params = sum(p.numel() for p in generator.parameters())
@@ -125,22 +127,44 @@ def main():
     print(f"Training samples: {train_samples}")
     print(f"Validation samples: {val_samples}\n")
 
-    print("Building generator model...")
-    generator, total_params, trainable_params = createGeneratorModel(config, device)
+    print("Building segmentator model...")
+    segmentator, total_params, trainable_params = createSegmentator(config, device)
     print(f"Total parameters: {total_params:,}")
     print(f"Trainable parameters: {trainable_params:,}\n")
 
-    optimizer = prepareOptimizer(generator.parameters(), config)
+    optimizer = prepareOptimizer(segmentator.parameters(), config)
     optimizers = {'segformer': optimizer}
 
     scheduler = prepareScheduler(optimizer, config, len(train_loader))
     schedulers = {'segformer': scheduler}
 
-    models = {'segformer': generator}
+    models = {'segformer': segmentator}
 
     loss_fn = createLossFunction(config, device)
     metrics = createMetrics()
 
+    train(
+        models=models,
+        optimizers=optimizers,
+        schedulers=schedulers,
+        train_loader=train_loader,
+        validation_loader=validation_loader,
+        loss_fn=loss_fn,
+        metrics=metrics,
+        device=device,
+        control_fn=SegmentationControlFunc(num_classes=4),
+        launch_number=args.launch_number,
+        num_epochs=config["EPOCHS"],
+        diagrams_data_path=config["DIAGRAMS_DATA_PATH"],
+        hyperparams_id=config["HYPERPARAMS_ID"],
+        weights_path=config["WEIGHTS_PATH"],
+        diagrams_path=config["DIAGRAMS_PATH"],
+        visualize_every_xth_epoch=config["VISUALIZE_EVERY"],
+        max_patience=config["PATIENCE"],
+        model_type="segmentator",
+        gradient_clip=config["GRADIENT_CLIP"],
+        early_stopping_metric="total_loss"
+    )
 
 
 if __name__ == "__main__":
