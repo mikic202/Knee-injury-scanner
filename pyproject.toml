@@ -9,6 +9,9 @@ dependencies = [
     "numpy==2.3.4",
     "pandas==2.2.3",
     "torch>=2.9.0",
+    "streamlit", 
+    "plotly",
+    "scikit-image",
 ]
 
 [dependency-groups]
