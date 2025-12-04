@@ -8,7 +8,7 @@ from pyaiwrap.optimizers import createOptimizer
 from pyaiwrap.schedulers import createScheduler
 from pyaiwrap.utils import prepareDevice
 from pyaiwrap.generator import createGenerator
-from pyaiwrap.control import SegmentationControlFunc
+from pyaiwrap.control import ControlFunctionFactory
 import torch
 from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
@@ -143,6 +143,8 @@ def main():
     loss_fn = createLossFunction(config, device)
     metrics = createMetrics()
 
+    control_fn = ControlFunctionFactory.createSegmentationControl(num_classes=4)
+
     train(
         models=models,
         optimizers=optimizers,
@@ -152,11 +154,11 @@ def main():
         loss_fn=loss_fn,
         metrics=metrics,
         device=device,
-        control_fn=SegmentationControlFunc(num_classes=4),
+        control_fn=control_fn,
         launch_number=args.launch_number,
         num_epochs=config["EPOCHS"],
         diagrams_data_path=config["DIAGRAMS_DATA_PATH"],
-        hyperparams_id=config["HYPERPARAMS_ID"],
+        config_id=config["HYPERPARAMS_ID"],
         weights_path=config["WEIGHTS_PATH"],
         diagrams_path=config["DIAGRAMS_PATH"],
         visualize_every_xth_epoch=config["VISUALIZE_EVERY"],
