@@ -34,3 +34,9 @@ class WandbLogger(DataLogger):
         if WandbLogger.RUN is not None:
             WandbLogger.RUN.finish()
             WandbLogger.RUN = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.finish()
