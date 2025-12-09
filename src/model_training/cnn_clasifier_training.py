@@ -1,4 +1,3 @@
-from src.model_architecture.SAE.ScansEncoder import ScansAutoencoder3d
 from src.model_training.training_helpers.knee_datasets import KneeScans3DDataset
 from src.model_architecture.cnn_clasifier.cnn_clasifier import CnnKneeClassifier
 from torch import optim

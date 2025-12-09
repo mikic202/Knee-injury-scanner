@@ -1,20 +1,15 @@
 from src.model_architecture.SAE.SAE import SaeDecoder, SaeEncoder
 from torch import optim
 import torch
-from src.model_architecture.SAE.ScansEncoder import ScansAutoencoder3d
 from src.model_training.training_helpers.knee_datasets import KneeScans3DDataset
-from torch import optim
 import torchio as tio
-import torch
 import time
-import os
-import numpy as np
 from src.model_training.training_helpers.loggers import WandbLogger
 
 
 INPUT_SIZE = 1024
 HIDDEN_SIZE = 256
-MAX_HIDDEN_FEATURES = 25
+MAX_HIDDEN_FEATURES = 50
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -54,7 +49,7 @@ dataset_transform = tio.transforms.Compose(
 
 
 dataset = KneeScans3DDataset(
-    datset_filepath="/media/mikic202/Nowy/uczelnia/semestr_9/SIWY/datasets/kneemri",
+    datset_filepath="/media/mikic202/Nowy1/uczelnia/semestr_9/SIWY/datasets/kneemri",
     transform=dataset_transform,
 )
 
@@ -96,8 +91,9 @@ def sae_loss(reconstructed, original, hidden, rho=0.05, beta=0.02):
 
 for epoch in range(NUM_EPOCHS):
     epoch_loass = 0.0
-    for batch in train_dataloader:
+    for batch, diagnossis in train_dataloader:
         batch = batch.to(device)
+        print(batch)
         with torch.no_grad():
             base_encoded = helper_model(batch.float())
 

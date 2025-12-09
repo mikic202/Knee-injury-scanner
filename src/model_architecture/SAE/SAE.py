@@ -1,6 +1,7 @@
 from torch import nn
 import torch
 import numpy as np
+from collections import defaultdict
 
 
 class SaeEncoder(nn.Module):
@@ -30,17 +31,25 @@ class SaeDecoder(nn.Module):
 def generate_sparse_autoencoder_statistics(
     encoder: SaeEncoder, dataset: torch.utils.data.Dataset
 ):
-    encoder.eval()
-    hidden_activations = []
+    hidden_activations = defaultdict(list)
 
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=64, shuffle=False)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     with torch.no_grad():
-        for data in dataloader:
-            hidden = encoder(data)
-            hidden_activations.append(hidden.cpu().numpy())
+        for scan, diagnosis in dataloader:
+            scan = scan.to(device)
+            hidden = encoder(scan)
+            for i in range(hidden.size(0)):
+                hidden_activations[diagnosis].append(hidden[i].cpu().numpy())
 
-    sparsity_pattern = np.concatenate(hidden_activations, axis=0)
-    top_k_sparse_actiavtion_patterns = np.sum(sparsity_pattern != 0, axis=0)
+    top_k_sparse_actiavtion_patterns = {}
+    sparsity_pattern = {}
+
+    for diagnosis in hidden_activations:
+        sparsity_pattern[diagnosis] = np.array(hidden_activations[diagnosis])
+        top_k_sparse_actiavtion_patterns[diagnosis] = np.sum(
+            sparsity_pattern[diagnosis] != 0, axis=0
+        )
 
     return sparsity_pattern, top_k_sparse_actiavtion_patterns

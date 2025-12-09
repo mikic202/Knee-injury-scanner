@@ -8,9 +8,9 @@ import os
 from src.model_training.training_helpers.loggers import WandbLogger
 
 ENCODED_DIM = 1024
-NUM_EPOCHS = 20
+NUM_EPOCHS = 50
 BATCH_SIZE = 2
-LR = 0.0008
+LR = 0.001
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = ScansAutoencoder3d(
