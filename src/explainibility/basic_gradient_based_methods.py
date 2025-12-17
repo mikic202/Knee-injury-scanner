@@ -7,9 +7,6 @@ from captum.attr import (
 )
 import torch
 import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib import cm
-from matplotlib.colors import ListedColormap, Normalize
 
 
 def explain_prediction_with_saliency(
