@@ -8,8 +8,8 @@ class CnnKneeClassifier(nn.Module):
             nn.Conv3d(input_channels, 32, kernel_size=3, stride=2, padding=1),
             nn.ReLU(),
             nn.MaxPool3d(kernel_size=2, stride=2),
-            nn.Conv3d(32, 64, kernel_size=3, stride=1, padding=1),
         )
+        self.last_feature = nn.Conv3d(32, 64, kernel_size=3, stride=1, padding=1)
         self.linear_layers = nn.Sequential(
             nn.ReLU(),
             nn.MaxPool3d(kernel_size=2, stride=2),
@@ -21,5 +21,6 @@ class CnnKneeClassifier(nn.Module):
 
     def forward(self, x):
         x = self.features(x)
+        x = self.last_feature(x)
         x = self.linear_layers(x)
         return x
