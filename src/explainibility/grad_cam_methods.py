@@ -1,7 +1,4 @@
-from captum.attr import (
-    LayerGradCam,
-    GuidedGradCam,
-)
+from captum.attr import LayerGradCam, GuidedGradCam, LayerAttribution
 import torch
 import numpy as np
 
@@ -18,7 +15,11 @@ def explain_prediction_with_grad_cam(
     input_tensor = torch.tensor(example, dtype=torch.float32).unsqueeze(0)
     if device is not None:
         input_tensor = input_tensor.to(device)
-    return layer_gc.attribute(input_tensor, target=target_class)
+    return LayerAttribution.interpolate(
+        layer_gc.attribute(input_tensor, target=target_class),
+        example.shape[-3:],
+        interpolate_mode="trilinear",
+    )
 
 
 def explain_prediction_with_guided_grad_cam(
