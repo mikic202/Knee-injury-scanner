@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import cm
 from matplotlib.colors import ListedColormap, Normalize
+import math
 
 
 def display_explainibility(
@@ -70,6 +71,46 @@ def display_explainibility(
             ccount=50,
             shade=False,
         )
+
+    plt.tight_layout()
+    plt.show()
+
+
+def display_explainibility_in_slices(
+    example_values: np.ndarray,
+    attributions_values: np.ndarray,
+    example_minimal_value: float = 100.0,
+    attributions_minimal_value: float = 0.0001,
+    figsize: tuple[int, int] = (12, 12),
+):
+    S = example_values.shape[0]
+
+    example = np.where(example_values >= example_minimal_value, example_values, np.nan)
+    attributions = np.where(
+        attributions_values >= attributions_minimal_value, attributions_values, np.nan
+    )
+
+    cols = int(math.ceil(np.sqrt(S)))
+    rows = int(math.ceil(S / cols))
+    _, axes = plt.subplots(rows, cols, figsize=figsize)
+    axes = axes.flatten()
+
+    example_norm = Normalize(vmin=np.nanmin(example), vmax=np.nanmax(example))
+    attributions_norm = Normalize(
+        vmin=np.nanmin(attributions), vmax=np.nanmax(attributions)
+    )
+
+    for i in range(S):
+        ax = axes[i]
+        ax.set_title(f"Slice {i}")
+
+        ax.imshow(example[i], cmap="gray", norm=example_norm)
+        ax.imshow(attributions[i], cmap="Reds", norm=attributions_norm, alpha=0.6)
+
+        ax.axis("off")
+
+    for j in range(S, len(axes)):
+        axes[j].axis("off")
 
     plt.tight_layout()
     plt.show()
