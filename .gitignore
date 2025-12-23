@@ -5,6 +5,15 @@ build/
 dist/
 wheels/
 *.egg-info
+.vscode/**
+
+# data
+data/**
+
+diagrams/**
+diagrams_data/**
+weights/**
+
 .pytest_cache/
 .ruff_cache/
 
