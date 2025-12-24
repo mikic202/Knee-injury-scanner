@@ -1,5 +1,6 @@
 import torch.nn as nn
 from typing import Callable
+import numpy as np
 
 from src.model_architecture.SAE.SAE import SaeDecoder, SaeEncoder
 from src.model_architecture.cnn_clasifier.cnn_clasifier import CnnKneeClassifier
@@ -7,8 +8,8 @@ from torch import optim
 import torch
 from src.model_training.training_helpers.knee_datasets import KneeScans3DDataset
 import torchio as tio
-import time
-from src.model_training.training_helpers.loggers import WandbLogger
+from collections import defaultdict
+from src.explainibility.visualization import display_sae_features
 
 
 def sae_loss(reconstructed, original, hidden, rho=0.05, beta=0.02):
@@ -116,7 +117,60 @@ def explain_model_with_sae(
         input_size,
         hidden_size,
         max_number_of_hidden_features,
+        num_of_epochs=20,
+        learning_rate=0.005,
     )
+
+
+def calculate_sae_statistics_per_class(sae_statistics: dict[int, list[np.ndarray]]):
+    feature_popularity_order_per_class = {}
+    feature_counts_per_class = {}
+
+    for diagnosis, hidden_representations in sae_statistics.items():
+        hidden_representations = np.vstack(hidden_representations)
+        feature_counts = np.sum(hidden_representations != 0, axis=0)
+        feature_counts_per_class[diagnosis] = feature_counts
+
+        feature_popularity_order = np.argsort(-feature_counts)
+        feature_popularity_order_per_class[diagnosis] = feature_popularity_order
+
+    return feature_popularity_order_per_class, feature_counts_per_class
+
+
+def sae_statistics(
+    sae_model: nn.Module,
+    base_model: nn.Module,
+    layer_to_explain,
+    dataset: KneeScans3DDataset,
+):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    sae_model = sae_model.to(device)
+    sae_model.eval()
+
+    layer_activations = [None]
+
+    def model_hooks(_, __, output):
+        layer_activations[0] = output.detach()
+
+    layer_to_explain.register_forward_hook(model_hooks)
+
+    def get_output_form_desierd_layer(inputs: torch.Tensor):
+        base_model(inputs)
+        return nn.Flatten()(layer_activations[0])
+
+    test_dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False)
+
+    output_sparsity = defaultdict(list)
+
+    for mri_scan, diagnosis in test_dataloader:
+        mri_scan = mri_scan.to(device)
+        with torch.no_grad():
+            base_encoded = get_output_form_desierd_layer(mri_scan.float())
+            hidden = sae_model(base_encoded)
+            output_sparsity[diagnosis.item()].append(hidden.cpu().numpy())
+
+    return dict(output_sparsity), *calculate_sae_statistics_per_class(output_sparsity)
 
 
 if __name__ == "__main__":
@@ -138,9 +192,12 @@ if __name__ == "__main__":
             "/home/mikic202/semestr_9/knee_scaner/models/basic_clasifier_model_1766343254.9682245.pth"
         )
     )
-
-    print(
-        get_sae_for_single_layer(
-            model, dataset, model.last_feature, 64 * 16 * 16 * 16, 128, 50
-        )
+    sae_model = explain_model_with_sae(
+        model, dataset, model.last_feature, 64 * 16 * 16 * 16, 512, 100
     )
+
+    a, b, c = sae_statistics(sae_model, model, model.last_feature, dataset)
+
+    np.save("sae_statistics_per_class.npy", a)
+
+    display_sae_features(a, output_path=".")

@@ -235,3 +235,23 @@ def dislay_all_explainibility(
     if display:
         plt.tight_layout()
         plt.show()
+
+
+def display_sae_features(
+    sae_statistics_per_class: dict[str, list[np.ndarray]],
+    output_path: Path,
+    display: bool = True,
+) -> None:
+    _, axes = plt.subplots(len(sae_statistics_per_class), figsize=(12, 12))
+    for i, class_label in enumerate(sae_statistics_per_class):
+        features = np.array(sae_statistics_per_class[class_label]).squeeze()
+        ax = axes[i]
+        ax.set_title(f"Features for class {class_label}")
+
+        ax.pcolormesh(features)
+
+    plt.savefig(output_path / "sae_features_per_class.png")
+
+    if display:
+        plt.tight_layout()
+        plt.show()
