@@ -12,6 +12,10 @@ from src.explainibility.basic_gradient_based_methods import (
     explain_prediction_with_saliency,
     explain_prediction_with_integrated_gradients,
 )
+from src.explainibility.grad_cam_methods import (
+    explain_prediction_with_grad_cam,
+    explain_prediction_with_guided_grad_cam,
+)
 from pathlib import Path
 
 
@@ -231,6 +235,62 @@ def dislay_all_explainibility(
     )
 
     plt.savefig(save_path / "integrated_gradients_explainibility.png")
+
+    if display:
+        plt.tight_layout()
+        plt.show()
+
+
+def display_grad_cam_explanattions(
+    model: nn.Module,
+    layer_to_explain,
+    example: np.ndarray,
+    target_class: int,
+    device: torch.device | None = None,
+    display: bool = True,
+    save_path: Path | None = None,
+) -> None:
+    if not save_path:
+        save_path = Path("")
+    grad_cam_atribution = (
+        explain_prediction_with_grad_cam(
+            model, layer_to_explain, example, target_class, device
+        )
+        .squeeze(0)
+        .squeeze(0)
+        .detach()
+        .cpu()
+    )
+
+    display_explainibility(
+        example.squeeze(0),
+        grad_cam_atribution,
+        atributions_minimal_value=get_ideal_minimal_atribution_value(
+            grad_cam_atribution
+        ),
+        display=False,
+        title="Grad-CAM Explainibility Visualization",
+    )
+    plt.savefig(save_path / "grad_cam_explainibility.png")
+    guided_grad_cam_atribution = (
+        explain_prediction_with_guided_grad_cam(
+            model, layer_to_explain, example, target_class, device
+        )
+        .squeeze(0)
+        .squeeze(0)
+        .detach()
+        .cpu()
+    )
+    display_explainibility(
+        example.squeeze(0),
+        guided_grad_cam_atribution,
+        atributions_minimal_value=get_ideal_minimal_atribution_value(
+            guided_grad_cam_atribution
+        ),
+        display=False,
+        title="Guided Grad-CAM Explainibility Visualization",
+    )
+    plt.savefig(save_path / "guided_grad_cam_explainibility.png")
 
     if display:
         plt.tight_layout()
