@@ -3,6 +3,20 @@ import matplotlib.pyplot as plt
 from matplotlib import cm
 from matplotlib.colors import ListedColormap, Normalize
 import math
+import torch.nn as nn
+import torch
+from src.explainibility.basic_gradient_based_methods import (
+    explain_prediction_with_deconvolution,
+    explain_prediction_with_guided_backprop,
+    explain_prediction_with_input_x_gradient,
+    explain_prediction_with_saliency,
+    explain_prediction_with_integrated_gradients,
+)
+from src.explainibility.grad_cam_methods import (
+    explain_prediction_with_grad_cam,
+    explain_prediction_with_guided_grad_cam,
+)
+from pathlib import Path
 
 
 def display_explainibility(
@@ -13,6 +27,8 @@ def display_explainibility(
     example_alpha_visibility: float = 0.1,
     figsize: tuple[int, int] = (12, 12),
     z_slize_size: int = 10,
+    display: bool = True,
+    title: str = "3D Explainibility Visualization",
 ) -> None:
     example_mask = example_values >= example_minimal_value
     example = example_values * example_mask
@@ -72,8 +88,11 @@ def display_explainibility(
             shade=False,
         )
 
-    plt.tight_layout()
-    plt.show()
+    plt.title(title)
+
+    if display:
+        plt.tight_layout()
+        plt.show()
 
 
 def display_explainibility_in_slices(
@@ -82,6 +101,8 @@ def display_explainibility_in_slices(
     example_minimal_value: float = 100.0,
     attributions_minimal_value: float = 0.0001,
     figsize: tuple[int, int] = (12, 12),
+    display: bool = True,
+    title: str = "Explainibility Slices Visualization",
 ):
     S = example_values.shape[0]
 
@@ -112,5 +133,185 @@ def display_explainibility_in_slices(
     for j in range(S, len(axes)):
         axes[j].axis("off")
 
-    plt.tight_layout()
-    plt.show()
+    plt.title(title)
+
+    if display:
+        plt.tight_layout()
+        plt.show()
+
+
+def get_ideal_minimal_atribution_value(
+    attributions_values: np.ndarray,
+):
+    return attributions_values.max() * 0.2
+
+
+def dislay_all_explainibility(
+    model: nn.Module,
+    example: np.ndarray,
+    target_class: int,
+    device: torch.device | None = None,
+    display: bool = True,
+    save_path: Path | None = None,
+) -> None:
+    if not save_path:
+        save_path = Path("")
+
+    silency_atributions = explain_prediction_with_saliency(
+        model, example, target_class, device
+    )
+
+    display_explainibility(
+        example.squeeze(0),
+        silency_atributions.squeeze(0),
+        atributions_minimal_value=get_ideal_minimal_atribution_value(
+            silency_atributions
+        ),
+        display=False,
+        title="Saliency Explainibility Visualization",
+    )
+
+    plt.savefig(save_path / "saliency_explainibility.png")
+
+    deconvolution_atribution = explain_prediction_with_deconvolution(
+        model, example, target_class, device
+    )
+
+    display_explainibility(
+        example.squeeze(0),
+        deconvolution_atribution.squeeze(0),
+        atributions_minimal_value=get_ideal_minimal_atribution_value(
+            deconvolution_atribution
+        ),
+        display=False,
+        title="Deconvolution Explainibility Visualization",
+    )
+
+    plt.savefig(save_path / "deconvolution_explainibility.png")
+
+    guided_backprop_atribution = explain_prediction_with_guided_backprop(
+        model, example, target_class, device
+    )
+
+    display_explainibility(
+        example.squeeze(0),
+        guided_backprop_atribution.squeeze(0),
+        atributions_minimal_value=get_ideal_minimal_atribution_value(
+            guided_backprop_atribution
+        ),
+        display=False,
+        title="Guided Backpropagation Explainibility Visualization",
+    )
+
+    plt.savefig(save_path / "guided_backprop_explainibility.png")
+
+    input_x_gradient_atribution = explain_prediction_with_input_x_gradient(
+        model, example, target_class, device
+    )
+
+    display_explainibility(
+        example.squeeze(0),
+        input_x_gradient_atribution.squeeze(0),
+        atributions_minimal_value=get_ideal_minimal_atribution_value(
+            input_x_gradient_atribution
+        ),
+        display=False,
+        title="Input x Gradient Explainibility Visualization",
+    )
+
+    plt.savefig(save_path / "input_x_gradient_explainibility.png")
+
+    integrated_gradients_atribution = explain_prediction_with_integrated_gradients(
+        model, example, target_class, device
+    )
+    display_explainibility(
+        example.squeeze(0),
+        integrated_gradients_atribution.squeeze(0),
+        atributions_minimal_value=get_ideal_minimal_atribution_value(
+            integrated_gradients_atribution
+        ),
+        display=False,
+        title="Integrated Gradients Explainibility Visualization",
+    )
+
+    plt.savefig(save_path / "integrated_gradients_explainibility.png")
+
+    if display:
+        plt.tight_layout()
+        plt.show()
+
+
+def display_grad_cam_explanattions(
+    model: nn.Module,
+    layer_to_explain,
+    example: np.ndarray,
+    target_class: int,
+    device: torch.device | None = None,
+    display: bool = True,
+    save_path: Path | None = None,
+) -> None:
+    if not save_path:
+        save_path = Path("")
+    grad_cam_atribution = (
+        explain_prediction_with_grad_cam(
+            model, layer_to_explain, example, target_class, device
+        )
+        .squeeze(0)
+        .squeeze(0)
+        .detach()
+        .cpu()
+    )
+
+    display_explainibility(
+        example.squeeze(0),
+        grad_cam_atribution,
+        atributions_minimal_value=get_ideal_minimal_atribution_value(
+            grad_cam_atribution
+        ),
+        display=False,
+        title="Grad-CAM Explainibility Visualization",
+    )
+    plt.savefig(save_path / "grad_cam_explainibility.png")
+    guided_grad_cam_atribution = (
+        explain_prediction_with_guided_grad_cam(
+            model, layer_to_explain, example, target_class, device
+        )
+        .squeeze(0)
+        .squeeze(0)
+        .detach()
+        .cpu()
+    )
+    display_explainibility(
+        example.squeeze(0),
+        guided_grad_cam_atribution,
+        atributions_minimal_value=get_ideal_minimal_atribution_value(
+            guided_grad_cam_atribution
+        ),
+        display=False,
+        title="Guided Grad-CAM Explainibility Visualization",
+    )
+    plt.savefig(save_path / "guided_grad_cam_explainibility.png")
+
+    if display:
+        plt.tight_layout()
+        plt.show()
+
+
+def display_sae_features(
+    sae_statistics_per_class: dict[str, list[np.ndarray]],
+    output_path: Path,
+    display: bool = True,
+) -> None:
+    _, axes = plt.subplots(len(sae_statistics_per_class), figsize=(12, 12))
+    for i, class_label in enumerate(sae_statistics_per_class):
+        features = np.array(sae_statistics_per_class[class_label]).squeeze()
+        ax = axes[i]
+        ax.set_title(f"Features for class {class_label}")
+
+        ax.pcolormesh(features)
+
+    plt.savefig(output_path / "sae_features_per_class.png")
+
+    if display:
+        plt.tight_layout()
+        plt.show()

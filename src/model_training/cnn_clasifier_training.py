@@ -8,7 +8,7 @@ import os
 import numpy as np
 from src.model_training.training_helpers.loggers import WandbLogger
 
-NUM_EPOCHS = 5
+NUM_EPOCHS = 3
 BATCH_SIZE = 2
 LR = 0.0001
 
@@ -87,10 +87,12 @@ for batch, classes in test_dataloader:
     _, predicted = torch.max(outputs.data, 1)
     predictions.append(predicted.item())
     real.append(classes.item())
-    print(f"True: {classes.item()}, Predicted: {predicted.item()}")
+    # print(f"True: {classes.item()}, Predicted: {predicted.item()}")
 
 np.save(f"models/basic_clasifier_predictions_{time.time()}.npy", predictions)
 np.save(f"models/basic_clasifier_real_{time.time()}.npy", real)
+
+torch.save(model.state_dict(), f"models/basic_clasifier_model_{time.time()}.pth")
 
 model_scripted = torch.jit.script(model.cpu())
 model_scripted.save(f"models/basic_clasifier_model_{time.time()}.pt")
