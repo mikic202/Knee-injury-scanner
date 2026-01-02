@@ -53,7 +53,7 @@ try:
     for epoch in range(NUM_EPOCHS):
         model.train()
         epoch_loss = 0.0
-        for batch in train_dataloader:
+        for batch, _ in train_dataloader:
             batch = batch.to(device)
             optimizer.zero_grad()
             outputs = model(batch.float())

@@ -12,10 +12,6 @@ class SaeEncoder(nn.Module):
 
     def forward(self, x):
         hidden = torch.sigmoid(self.linear(x))
-        _, topk_idx = torch.topk(hidden, self.max_hidden_features, dim=1)
-        mask = torch.zeros_like(hidden, dtype=torch.bool)
-        mask.scatter_(1, topk_idx, True)
-        hidden = hidden * mask
         return hidden
 
 

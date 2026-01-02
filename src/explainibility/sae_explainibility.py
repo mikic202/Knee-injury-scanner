@@ -3,28 +3,30 @@ from typing import Callable
 import numpy as np
 
 from src.model_architecture.SAE.SAE import SaeDecoder, SaeEncoder
-from src.model_architecture.cnn_clasifier.cnn_clasifier import CnnKneeClassifier
+from src.model_architecture.SAE.ScansEncoder import ScansAutoencoder3d
 from torch import optim
 import torch
 from src.model_training.training_helpers.knee_datasets import KneeScans3DDataset
 import torchio as tio
 from collections import defaultdict
 from src.explainibility.visualization import display_sae_features
+from pathlib import Path
 
 
-def sae_loss(reconstructed, original, hidden, rho=0.05, beta=0.02):
-    eps = 1e-7
-    reconstruction_loss = torch.nn.functional.mse_loss(reconstructed, original)
+def kl_divergence(p, q, eps=1e-6):
+    q = torch.clamp(q, eps, 1 - eps)
+    p = torch.clamp(p, eps, 1 - eps)
+    return p * torch.log(p / q) + (1 - p) * torch.log((1 - p) / (1 - q))
+
+
+def sae_loss(recon, original, hidden, beta=2000, rho=0.05):
+    recon_loss = torch.nn.functional.mse_loss(recon, original, reduction="mean")
 
     rho_hat = hidden.mean(dim=0)
-    rho_hat = torch.clamp(rho_hat, eps, 1 - eps)
+    rho_hat = torch.clamp(rho_hat, 1e-4, 1 - 1e-4)
+    sparsity_loss = kl_divergence(torch.full_like(rho_hat, rho), rho_hat).mean()
 
-    kl = rho * torch.log(rho / rho_hat) + (1 - rho) * torch.log(
-        (1 - rho) / (1 - rho_hat)
-    )
-    sparsity_loss = kl.sum()
-
-    return reconstruction_loss + beta * sparsity_loss, sparsity_loss
+    return recon_loss + beta * sparsity_loss, sparsity_loss
 
 
 def train_sae(
@@ -50,11 +52,25 @@ def train_sae(
     decoder_optimizer = optim.Adam(decoder.parameters(), lr=learning_rate)
 
     encoder_scheduler = optim.lr_scheduler.StepLR(
-        encoder_optimizer, step_size=5, gamma=0.95
+        encoder_optimizer, step_size=20, gamma=0.95
     )
     decoder_scheduler = optim.lr_scheduler.StepLR(
-        decoder_optimizer, step_size=5, gamma=0.95
+        decoder_optimizer, step_size=20, gamma=0.95
     )
+
+    # labels = [dataset[i][1] for i in range(len(dataset))]
+
+    # class_sample_count = np.array(
+    #     [len(np.where(labels == t)[0]) for t in np.unique(labels)]
+    # )
+
+    # weight = 1.0 / class_sample_count
+    # samples_weight = torch.from_numpy(np.array([weight[t] for t in labels])).double()
+
+    # # 4. Create the sampler
+    # sampler = torch.utils.data.WeightedRandomSampler(
+    #     samples_weight, len(samples_weight)
+    # )
 
     train_dataloader = torch.utils.data.DataLoader(
         dataset, batch_size=batch_size, shuffle=True
@@ -62,6 +78,7 @@ def train_sae(
 
     for epoch in range(num_of_epochs):
         epoch_loass = 0.0
+        act_freq = torch.zeros(hidden_size).to(device)
         for batch, _ in train_dataloader:
             batch = batch.to(device)
             with torch.no_grad():
@@ -70,6 +87,7 @@ def train_sae(
             encoder_optimizer.zero_grad()
             decoder_optimizer.zero_grad()
             hidden = encoder(base_encoded)
+            act_freq += (hidden > 0).float().sum(0)  # Count activations
 
             reconstructed = decoder(hidden)
 
@@ -79,10 +97,25 @@ def train_sae(
             decoder_optimizer.step()
 
             epoch_loass += loss.item() * batch.size(0)
+            torch.nn.utils.clip_grad_norm_(decoder.parameters(), max_norm=1.0)
+            torch.nn.utils.clip_grad_norm_(encoder.parameters(), max_norm=1.0)
 
         print(
             f"Epoch {epoch+1}/{num_of_epochs}, Loss: {epoch_loass / len(dataset):.4f}, sparsity_losss: {sparsity_loss.item():.4f} "
         )
+        dead_neurons = (act_freq == 0).nonzero(as_tuple=True)[0]
+        if len(dead_neurons) > 0:
+            print(f"Resampling {len(dead_neurons)} dead neurons...")
+            with torch.no_grad():
+                replacement_weights = base_encoded[
+                    torch.randint(0, base_encoded.size(0), (len(dead_neurons),))
+                ]
+                encoder.linear.weight.data[dead_neurons] = replacement_weights
+                decoder.linear.weight.data[:, dead_neurons] = replacement_weights.T
+
+        with torch.no_grad():
+            activation_rate = hidden.mean().item()
+        print(f"Activation rate: {activation_rate:.4f}")
         encoder_scheduler.step()
         decoder_scheduler.step()
     return encoder
@@ -118,7 +151,7 @@ def explain_model_with_sae(
         hidden_size,
         max_number_of_hidden_features,
         num_of_epochs=20,
-        learning_rate=0.005,
+        learning_rate=0.007,
     )
 
 
@@ -186,18 +219,24 @@ if __name__ == "__main__":
         transform=dataset_transform,
     )
 
-    model = CnnKneeClassifier(num_classes=3, input_channels=1)
+    model = torch.jit.load(
+        "/home/mikic202/semestr_9/knee_scaner/models/autoencoder_model_1766763541.5195265.pt"
+    )
+    torch.save(
+        model.state_dict(),
+        "/home/mikic202/semestr_9/knee_scaner/models/autoencoder_model_1766763541.5195265.pth",
+    )
+    model = ScansAutoencoder3d(input_channels=1, output_channels=1, feature_dim=1024)
     model.load_state_dict(
         torch.load(
-            "/home/mikic202/semestr_9/knee_scaner/models/basic_clasifier_model_1766343254.9682245.pth"
+            "/home/mikic202/semestr_9/knee_scaner/models/autoencoder_model_1766763541.5195265.pth"
         )
     )
-    sae_model = explain_model_with_sae(
-        model, dataset, model.last_feature, 64 * 16 * 16 * 16, 512, 100
-    )
 
-    a, b, c = sae_statistics(sae_model, model, model.last_feature, dataset)
+    model = model.encoder
+
+    sae_model = explain_model_with_sae(model, dataset, model.fc, 1024, 4096, 512)
+
+    a, b, c = sae_statistics(sae_model, model, model.fc, dataset)
 
     np.save("sae_statistics_per_class.npy", a)
-
-    display_sae_features(a, output_path=".")
