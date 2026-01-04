@@ -321,7 +321,7 @@ def main():
     lime_explainer = LIMEExplainer(
         n_samples=50,           # Number of LIME samples
         batch_size=1,           # Batch size for processing
-        segmentation_mode=True,  # Important for 3D segmentation
+        segmentation_mode=True,  # Vital for 3D segmentation
     )
 
     print(f"Dataset size: {dataset_size} samples")
