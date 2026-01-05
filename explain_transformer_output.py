@@ -4,7 +4,7 @@ from pyaiwrap.config import loadConfig
 from pyaiwrap.utils import prepareDevice
 from pyaiwrap.generator import createGenerator
 from torch.utils.data import DataLoader
-from pyaiwrap.xai import LIMEExplainer, SaliencyExplainer
+from pyaiwrap.xai import LIMEExplainer, SaliencyExplainer, GradCAMExplainer
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
@@ -381,6 +381,21 @@ def main():
     print(f"  Mean: {explanation.mean():.6f}")
     print(f"  Std: {explanation.std():.6f}")
     simpleDualGrid(voxels, explanation, "Saliency", save_path=f"./diagrams/SegFormer3D_kneemridataset_saliency_explanation_{args.sample_idx}.png", dpi=250, alpha=1.0)
+
+    explainer = GradCAMExplainer()
+
+    explanation = explainer.explain(
+        model=generator,
+        input_tensor=voxels,
+        target_class=None
+    )
+
+    print("\nExplanation Statistics (GradCAM):")
+    print(f"  Shape: {explanation.shape}")
+    print(f"  Range: [{explanation.min():.6f}, {explanation.max():.6f}]")
+    print(f"  Mean: {explanation.mean():.6f}")
+    print(f"  Std: {explanation.std():.6f}")
+    simpleDualGrid(voxels, explanation, "GradCAM", save_path=f"./diagrams/SegFormer3D_kneemridataset_gradcam_explanation_{args.sample_idx}.png", dpi=250, alpha=1.0)
 
 
 if __name__ == "__main__":
