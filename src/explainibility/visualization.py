@@ -99,16 +99,17 @@ def display_explainibility_in_slices(
     example_values: np.ndarray,
     attributions_values: np.ndarray,
     example_minimal_value: float = 100.0,
-    attributions_minimal_value: float = 0.0001,
+    atributions_minimal_value: float = 0.0001,
     figsize: tuple[int, int] = (12, 12),
     display: bool = True,
     title: str = "Explainibility Slices Visualization",
 ):
+
     S = example_values.shape[0]
 
     example = np.where(example_values >= example_minimal_value, example_values, np.nan)
     attributions = np.where(
-        attributions_values >= attributions_minimal_value, attributions_values, np.nan
+        attributions_values >= atributions_minimal_value, attributions_values, np.nan
     )
 
     cols = int(math.ceil(np.sqrt(S)))
@@ -153,7 +154,12 @@ def dislay_all_explainibility(
     device: torch.device | None = None,
     display: bool = True,
     save_path: Path | None = None,
+    in_slices: bool = False,
 ) -> None:
+    displaying_function = display_explainibility
+    if in_slices:
+        displaying_function = display_explainibility_in_slices
+
     if not save_path:
         save_path = Path("")
 
@@ -161,7 +167,7 @@ def dislay_all_explainibility(
         model, example, target_class, device
     )
 
-    display_explainibility(
+    displaying_function(
         example.squeeze(0),
         silency_atributions.squeeze(0),
         atributions_minimal_value=get_ideal_minimal_atribution_value(
@@ -177,7 +183,7 @@ def dislay_all_explainibility(
         model, example, target_class, device
     )
 
-    display_explainibility(
+    displaying_function(
         example.squeeze(0),
         deconvolution_atribution.squeeze(0),
         atributions_minimal_value=get_ideal_minimal_atribution_value(
@@ -193,7 +199,7 @@ def dislay_all_explainibility(
         model, example, target_class, device
     )
 
-    display_explainibility(
+    displaying_function(
         example.squeeze(0),
         guided_backprop_atribution.squeeze(0),
         atributions_minimal_value=get_ideal_minimal_atribution_value(
@@ -209,7 +215,7 @@ def dislay_all_explainibility(
         model, example, target_class, device
     )
 
-    display_explainibility(
+    displaying_function(
         example.squeeze(0),
         input_x_gradient_atribution.squeeze(0),
         atributions_minimal_value=get_ideal_minimal_atribution_value(
@@ -224,7 +230,7 @@ def dislay_all_explainibility(
     integrated_gradients_atribution = explain_prediction_with_integrated_gradients(
         model, example, target_class, device
     )
-    display_explainibility(
+    displaying_function(
         example.squeeze(0),
         integrated_gradients_atribution.squeeze(0),
         atributions_minimal_value=get_ideal_minimal_atribution_value(
