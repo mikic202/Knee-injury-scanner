@@ -14,6 +14,18 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          
+      - name: Debug submodules
+        run: |
+          echo "=== Submodule status ==="
+          git submodule status --recursive
+          echo "=== PyAiWrap directory ==="
+          ls -la git_submodules/PyAiWrap || echo "Directory not found"
+          echo "=== Looking for pyproject.toml ==="
+          find git_submodules/PyAiWrap -name "pyproject.toml" -o -name ".git" 2>/dev/null || echo "None found"
+          
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
