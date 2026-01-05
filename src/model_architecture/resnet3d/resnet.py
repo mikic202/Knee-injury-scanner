@@ -1,6 +1,4 @@
-"""ResNet3D model architecture for 3D medical image classification."""
-
-from typing import Optional, Sequence, Tuple
+from typing import Optional, Sequence
 import torch
 import torch.nn as nn
 from torch import Tensor
@@ -8,11 +6,6 @@ import torch.nn.functional as F
 
 
 class FocalLoss(nn.Module):
-    """
-    Focal Loss for handling imbalanced datasets.
-    Zmniejsza wagę easy examples i koncentruje się na hard examples.
-    Formula: FL(pt) = -alpha_t * (1 - pt)^gamma * log(pt)
-    """
     def __init__(self, alpha=None, gamma=2.0, reduction='mean'):
         super().__init__()
         self.alpha = alpha  # class weights as tensor (num_classes,)
