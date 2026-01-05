@@ -5,12 +5,6 @@ from pathlib import Path
 import sys
 from typing import Callable, Optional, Tuple
 from collections import Counter
-
-# Ensure project root is on sys.path for "src" imports
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
 import numpy as np
 import torch
 import torch.nn as nn
@@ -28,14 +22,11 @@ from src.model_architecture.resnet3d.resnet import get_resnet3d, FocalLoss
 from src.model_training.training_helpers.loggers import WandbLogger
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 class PCK3DDataset(Dataset):
-    """
-    Ładuje pliki .pck zawierające numpy array lub dict z kluczem 'image'/'volume'/'img'/'data'.
-    Zwraca tensor (C=1, D, H, W) float32 z zakresu [0,1] przeskalowany do target_shape.
-    root: katalog z plikami .pck (może zawierać podkatalogi).
-    label_fn: funkcja Path -> int (domyślnie z metadata.csv po volumeFilename i label_column).
-    target_shape: (D, H, W)
-    """
     def __init__(self, root: str, extensions=(".pck",), target_shape: Tuple[int,int,int]=(32,128,128),
                  label_fn: Optional[Callable[[Path], int]] = None,
                  labels_dict: Optional[dict] = None):
@@ -46,7 +37,6 @@ class PCK3DDataset(Dataset):
         if not self.paths:
             raise FileNotFoundError(f"No files with {extensions} under {root}")
         self.target_shape = target_shape
-        # labels_dict: {volumeFilename: label}
         if labels_dict is not None:
             self.label_fn = lambda p: labels_dict.get(p.name, -1)
         else:
@@ -68,7 +58,6 @@ class PCK3DDataset(Dataset):
             for key in ("image", "volume", "img", "data", "array"):
                 if key in obj:
                     return np.asarray(obj[key])
-        # fallback: search for first ndarray in attributes
         if hasattr(obj, "__dict__"):
             for v in vars(obj).values():
                 if isinstance(v, np.ndarray):
@@ -80,7 +69,6 @@ class PCK3DDataset(Dataset):
             obj = pickle.load(f)
         arr = self._extract_array_from_pickle(obj)
         arr = np.asarray(arr)
-        # normalize intensities to 0-1
         if arr.dtype.kind == "u" or arr.dtype.kind == "i":
             arr = arr.astype(np.float32)
         else:
@@ -93,11 +81,9 @@ class PCK3DDataset(Dataset):
         return arr
 
     def _to_tensor_resized(self, arr: np.ndarray):
-        # ensure arr is (D, H, W) or (H,W) -> make (D,H,W)
         if arr.ndim == 2:
             arr = np.expand_dims(arr, 0)
         elif arr.ndim == 3:
-            # assume (D,H,W) or (H,W,C) ; heuristics: if last dim <=4 treat as channels -> take first channel
             if arr.shape[-1] <= 4 and arr.shape[0] > 4:
                 pass
             elif arr.shape[0] <= 4 and arr.shape[-1] > 4:
@@ -107,11 +93,9 @@ class PCK3DDataset(Dataset):
         D, H, W = arr.shape
         td, th, tw = self.target_shape
 
-        # ensure contiguous float32 numpy array (worker-safe) and convert to tensor
         arr = np.ascontiguousarray(arr, dtype=np.float32)
         t = torch.tensor(arr, dtype=torch.float32).unsqueeze(0).unsqueeze(0)  # shape (1,1,D,H,W)
 
-        # resize to target shape
         t = F.interpolate(t, size=(td, th, tw), mode="trilinear", align_corners=False)
         t = t.squeeze(0)  # shape (1,td,th,tw)
         return t  # (C=1, D, H, W)
@@ -125,19 +109,11 @@ class PCK3DDataset(Dataset):
 
 
 def choose_device(preferred: Optional[str] = None) -> torch.device:
-    """
-    Select device taking into account that torch.cuda.is_available() can be True
-    even when the GPU/driver is incompatible at runtime. Attempts a tiny CUDA
-    operation and synchronizes; on any error falls back to CPU.
-    """
-    # if user explicitly requested a device string, try to use it (may raise)
     if preferred:
-        # allow values like "cpu", "cuda", "cuda:0"
         try:
             dev = torch.device(preferred)
             if dev.type == "cpu":
                 return dev
-            # test small CUDA op to ensure runtime compatibility
             t = torch.tensor([1.0], device=dev)
             _ = t * 2.0
             if torch.cuda.is_available():
@@ -146,7 +122,6 @@ def choose_device(preferred: Optional[str] = None) -> torch.device:
         except Exception as e:
             print(f"Warning: requested device '{preferred}' not usable ({e}), falling back to auto selection.")
 
-    # auto selection: try CUDA if available and verify with a tiny op
     if torch.cuda.is_available():
         try:
             t = torch.tensor([1.0], device="cuda")
@@ -154,10 +129,8 @@ def choose_device(preferred: Optional[str] = None) -> torch.device:
             torch.cuda.synchronize()
             return torch.device("cuda")
         except Exception as e:
-            # common case: incompatible GPU / wrong CUDA build -> fall back to CPU
             print(f"Warning: CUDA detected but not usable ({e}). Falling back to CPU.")
             return torch.device("cpu")
-    # otherwise use CPU
     return torch.device("cpu")
 
 
@@ -212,9 +185,6 @@ def evaluate(model: nn.Module, dataloader, criterion, device, return_predictions
 
 
 def load_model_from_checkpoint(ckpt_path: str, device: torch.device, num_classes: int = 3, in_channels: int = 1):
-    """
-    Wczytuje weights do modelu i ustawia eval().
-    """
     model = get_resnet3d(num_classes=num_classes, in_channels=in_channels, device=device)
     sd = torch.load(str(ckpt_path), map_location=device)
     model.load_state_dict(sd)
@@ -223,10 +193,8 @@ def load_model_from_checkpoint(ckpt_path: str, device: torch.device, num_classes
 
 
 def _bbox_from_mask(mask: np.ndarray):
-    # mask: (D,H,W) boolean or 0-1
     nz = np.nonzero(mask)
     if len(nz[0]) == 0:
-        # nic nie wykryto -> zwróć cały zakres
         D, H, W = mask.shape
         return (0, D-1), (0, H-1), (0, W-1)
     d0, d1 = int(nz[0].min()), int(nz[0].max())
@@ -236,12 +204,10 @@ def _bbox_from_mask(mask: np.ndarray):
 
 
 def _smooth_cam_3d(cam: np.ndarray, sigma: float = 1.0) -> np.ndarray:
-    """Gaussian blur na CAM dla gładszej wizualizacji."""
     return gaussian_filter(cam, sigma=sigma)
 
 
 def _cam_metrics(cam: np.ndarray, threshold: float = 0.5) -> dict:
-    """Oblicz metryki CAM: średnia intensywność, % voxeli powyżej thresholdu, etc."""
     above_thresh = (cam >= threshold).sum()
     total_voxels = cam.size
     pct_active = 100.0 * above_thresh / total_voxels if total_voxels > 0 else 0.0
@@ -257,10 +223,7 @@ def _cam_metrics(cam: np.ndarray, threshold: float = 0.5) -> dict:
 def compute_gradcam_3d(model: nn.Module, input_tensor: torch.Tensor, target_class: Optional[int] = None,
                        target_layer: str = "layer4", upsample_size: Tuple[int,int,int] = None, 
                        device: Optional[torch.device] = None, smooth_sigma: float = 1.0):
-    """
-    Ulepszona 3D-GradCAM z Gaussian smooth i metykami.
-    Zwraca: probs (1D np), pred_class (int), cam_np (D,H,W float32), cam_metrics (dict)
-    """
+
     if device is None:
         device = input_tensor.device
     named_modules = dict(model.named_modules())
@@ -297,7 +260,8 @@ def compute_gradcam_3d(model: nn.Module, input_tensor: torch.Tensor, target_clas
     score.backward(retain_graph=False)
 
     if activations is None or gradients is None:
-        fh.remove(); bh.remove()
+        fh.remove()
+        bh.remove()
         raise RuntimeError("Grad-CAM hooks didn't capture activations/gradients")
 
     weights = torch.mean(gradients, dim=(2,3,4), keepdim=True)
@@ -309,20 +273,19 @@ def compute_gradcam_3d(model: nn.Module, input_tensor: torch.Tensor, target_clas
     cam_up = cam_up.squeeze(0).squeeze(0)
     cam_np = cam_up.cpu().detach().numpy()
     
-    # normalize 0-1
-    mn = float(cam_np.min()); mx = float(cam_np.max())
+    mn = float(cam_np.min())
+    mx = float(cam_np.max())
     if mx > mn:
         cam_np = (cam_np - mn) / (mx - mn)
     else:
         cam_np = cam_np * 0.0
 
-    # Smooth CAM z Gaussian blur
     cam_smooth = _smooth_cam_3d(cam_np, sigma=smooth_sigma)
     
-    # Oblicz metryki
     metrics = _cam_metrics(cam_smooth, threshold=0.5)
 
-    fh.remove(); bh.remove()
+    fh.remove()
+    bh.remove()
     return probs_t, pred, cam_smooth, metrics
 
 
@@ -390,7 +353,6 @@ def main():
     print(f"Using device: {device}")
     os.makedirs(args.save_dir, exist_ok=True)
 
-    # ---- Wczytaj etykiety z metadata.csv ----
     df = pd.read_csv(args.metadata_csv)
     if args.label_column not in df.columns or "volumeFilename" not in df.columns:
         raise ValueError(f"metadata.csv musi mieć kolumny 'volumeFilename' i '{args.label_column}'")
@@ -398,7 +360,6 @@ def main():
     print(f"[DEBUG] Loaded {len(labels_dict)} labels from {args.metadata_csv} (label column: {args.label_column})")
     # ----
 
-    # Optional W&B logger
     wandb_logger = None
     if args.wandb_project:
         wandb_config = {
@@ -459,7 +420,7 @@ def main():
     all_labels = [dataset.label_fn(dataset.paths[i]) for i in range(n)]
     print(f"[DEBUG] Total samples: {n}")
     print(f"[DEBUG] Label distribution (full dataset): {Counter(all_labels)}")
-    print(f"[DEBUG] Sample paths (first 5):")
+    print("[DEBUG] Sample paths (first 5):")
     for i in range(min(5, n)):
         print(f"  {dataset.paths[i]} -> label {all_labels[i]}")
 
@@ -516,10 +477,10 @@ def main():
         print(f"[INFO] Using Focal Loss (gamma={args.focal_gamma}) with class weights")
     elif args.weighted_loss:
         criterion = nn.CrossEntropyLoss(weight=class_weights)
-        print(f"[INFO] Using weighted CrossEntropyLoss")
+        print("[INFO] Using weighted CrossEntropyLoss")
     else:
         criterion = nn.CrossEntropyLoss()
-        print(f"[INFO] Using standard CrossEntropyLoss (no class weights)")
+        print("[INFO] Using standard CrossEntropyLoss (no class weights)")
     
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=args.patience)
 
@@ -587,7 +548,7 @@ def main():
             print(f"Selected sample for class {class_id}: {sample_path.name}")
     
     if len(samples_to_visualize) < 3:
-        print(f"[WARNING] Could not find samples for all classes, taking first 3 from validation set")
+        print("[WARNING] Could not find samples for all classes, taking first 3 from validation set")
         samples_to_visualize = []
         for i in range(min(3, len(val_indices))):
             idx = val_indices[i]
