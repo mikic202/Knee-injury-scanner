@@ -4,7 +4,7 @@ from pyaiwrap.config import loadConfig
 from pyaiwrap.utils import prepareDevice
 from pyaiwrap.generator import createGenerator
 from torch.utils.data import DataLoader
-from pyaiwrap.xai import LIMEExplainer
+from pyaiwrap.xai import LIMEExplainer, SaliencyExplainer
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
@@ -73,14 +73,15 @@ def createFeatureMask(input_tensor: torch.Tensor, block_size: int = 16):
     return feature_mask
 
 
-def simpleDualGrid(input_volume, explanation, save_path=None, dpi=150, alpha=0.4):
+def simpleDualGrid(input_volume, explanation, method_name="XAI", save_path=None, dpi=150, alpha=0.4):
     """
-    Combined visualization of input MRI with overlaid explanations in a single grid.
+    Combined visualization of input MRI with overlaid explanations.
 
     Args:
         input_volume: Input tensor [B, C, D, H, W] or [B, D, H, W]
         explanation: Explanation tensor [B, C, D, H, W] or [B, D, H, W]
-        save_path: Optional path to save the figure (str or Path)
+        method_name: Name of XAI method for title
+        save_path: Optional path to save figure
         dpi: Resolution for saved image
         alpha: Transparency for overlay (0-1)
     """
@@ -91,23 +92,38 @@ def simpleDualGrid(input_volume, explanation, save_path=None, dpi=150, alpha=0.4
         input_np = input_volume[0].cpu().numpy()
         exp_np = explanation[0].cpu().numpy()
 
-    rows, cols = 4, 8  # 4x8 = 32 slices
+    rows, cols = 4, 8
     slices_per_image = rows * cols
 
-    # Create figure with proper sizing for readability
+    # Create figure
     fig = plt.figure(figsize=(24, 12))
-
-    # Create main axes for the grid
     ax = plt.gca()
 
-    # Create normalization for explanations
-    exp_max = np.abs(exp_np).max()
-    exp_normalized = np.clip(exp_np, -exp_max, exp_max) / exp_max if exp_max > 0 else exp_np
+    # For saliency (only positive values), use single-sided colormap
+    if np.min(exp_np) >= 0:
+        # ENHANCED: Use percentile normalization for better visibility of low values
+        exp_max = np.percentile(exp_np, 99) if np.percentile(exp_np, 99) > 0 else exp_np.max()
+        exp_normalized = exp_np / (exp_max + 1e-8)
+        # ENHANCED: Apply gamma correction to boost lower values
+        exp_normalized = np.power(exp_normalized, 0.5)
+
+        colors = ['black', 'red']  # Black to red for positive-only
+        cmap = mcolors.LinearSegmentedColormap.from_list('positive_attribution', colors)
+        norm = mcolors.Normalize(vmin=0, vmax=1)
+        attribution_type = "(Red=Positive Attribution)"
+    else:
+        # For LIME (positive and negative), use dual-sided colormap
+        # ENHANCED: Use 99th percentile for normalization to avoid outlier dominance
+        exp_abs_max = np.percentile(np.abs(exp_np), 99)
+        exp_normalized = np.clip(exp_np / (exp_abs_max + 1e-8), -1, 1)
+
+        colors = ['blue', 'white', 'red']
+        cmap = mcolors.LinearSegmentedColormap.from_list('attribution', colors)
+        norm = mcolors.Normalize(vmin=-1, vmax=1)
+        attribution_type = "(Blue=Negative, Red=Positive Attribution)"
 
     # Get slice dimensions
     slice_height, slice_width = input_np.shape[1], input_np.shape[2]
-
-    # Create empty RGB grid
     grid_height = slice_height * rows
     grid_width = slice_width * cols
     grid = np.zeros((grid_height, grid_width, 3))
@@ -117,17 +133,15 @@ def simpleDualGrid(input_volume, explanation, save_path=None, dpi=150, alpha=0.4
         row = i // cols
         col = i % cols
 
-        # Calculate grid position
         y_start = row * slice_height
         y_end = (row + 1) * slice_height
         x_start = col * slice_width
         x_end = (col + 1) * slice_width
 
-        # Get current slice
         input_slice = input_np[i]
         exp_slice = exp_normalized[i]
 
-        # Normalize input for grayscale display
+        # Normalize input
         input_min, input_max = input_slice.min(), input_slice.max()
         if input_max > input_min:
             input_normalized = (input_slice - input_min) / (input_max - input_min)
@@ -135,46 +149,49 @@ def simpleDualGrid(input_volume, explanation, save_path=None, dpi=150, alpha=0.4
             input_normalized = input_slice
 
         # Create RGB representation
-        # Red channel: positive explanations
-        red = np.zeros_like(input_normalized)
-        pos_mask = exp_slice > 0
-        red[pos_mask] = exp_slice[pos_mask]
-
-        # Blue channel: negative explanations
-        blue = np.zeros_like(input_normalized)
-        neg_mask = exp_slice < 0
-        blue[neg_mask] = -exp_slice[neg_mask]
-
-        # Green channel: grayscale background (input)
-        green = input_normalized.copy()
+        if np.min(exp_np) >= 0:
+            # Saliency: red channel for attribution, green for background
+            # ENHANCED: Boost red channel intensity
+            red = exp_slice * 2.0  # Increased from 1.0 to 2.0
+            green = input_normalized * 0.7  # Reduced to make red stand out more
+            blue = np.zeros_like(input_normalized)
+        else:
+            # LIME: red for positive, blue for negative, green for background
+            # ENHANCED: Boost color intensity
+            red = np.maximum(exp_slice, 0) * 1.5  # Increased from 1.0 to 1.5
+            blue = np.maximum(-exp_slice, 0) * 1.5  # Increased from 1.0 to 1.5
+            green = input_normalized * 0.8  # Slightly reduced
 
         rgb_slice = np.stack([red, green, blue], axis=-1)
+        # ENHANCED: Use adaptive alpha - stronger attributions get higher alpha
+        if np.min(exp_np) >= 0:
+            # For saliency, use intensity-based alpha
+            attr_strength = exp_slice
+            adaptive_alpha = alpha * (0.3 + 0.7 * attr_strength)
+        else:
+            # For LIME, use absolute value for alpha
+            attr_strength = np.abs(exp_slice)
+            adaptive_alpha = alpha * (0.3 + 0.7 * attr_strength)
 
-        # Apply alpha blending
-        rgb_slice = input_normalized[:, :, None] * (1 - alpha) + rgb_slice * alpha
-
-        # Place in grid
+        rgb_slice = input_normalized[:, :, None] * (1 - adaptive_alpha[:, :, None]) + rgb_slice * adaptive_alpha[:, :, None]
+        rgb_slice = np.clip(rgb_slice, 0, 1)  # Ensure values stay in valid range
         grid[y_start:y_end, x_start:x_end, :] = rgb_slice
 
-    # Display the grid
+    # Display grid
     im = ax.imshow(grid, vmin=0, vmax=1)
 
-    # Title with white text for better visibility
-    ax.set_title('MRI Slices with LIME Explanations Overlay\n(Red=Positive Attribution, Blue=Negative Attribution)', 
-                 fontsize=16, pad=20, fontweight='bold', color='white')
-
-    # Add a subtle background to the title for better contrast
+    # Set title
+    title_text = f'MRI Slices with {method_name} Explanations Overlay\n{attribution_type}'
+    ax.set_title(title_text, fontsize=16, pad=20, fontweight='bold', color='white')
     title = ax.title
     title.set_bbox(dict(boxstyle='round,pad=0.3', facecolor='black', alpha=0.7, edgecolor='white'))
 
     ax.axis('off')
 
-    # Add slice numbers to each grid cell for better orientation
+    # Add slice numbers
     for i in range(min(slices_per_image, input_np.shape[0])):
         row = i // cols
         col = i % cols
-
-        # Position for text (top-left corner of each slice)
         text_x = col * slice_width + 5
         text_y = row * slice_height + 15
 
@@ -182,12 +199,18 @@ def simpleDualGrid(input_volume, explanation, save_path=None, dpi=150, alpha=0.4
                 fontsize=9, color='white', fontweight='bold',
                 bbox=dict(boxstyle='round,pad=0.3', facecolor='black', alpha=0.8, edgecolor='white'))
 
-    # Legend with white text
-    legend_elements = [
-        Patch(facecolor='red', alpha=0.8, edgecolor='white', linewidth=1, label='Positive Attribution'),
-        Patch(facecolor='blue', alpha=0.8, edgecolor='white', linewidth=1, label='Negative Attribution'),
-        Patch(facecolor='white', alpha=0.8, edgecolor='black', linewidth=1, label='Original MRI'),
-    ]
+    # Create legend
+    if np.min(exp_np) >= 0:
+        legend_elements = [
+            Patch(facecolor='red', alpha=0.8, edgecolor='white', linewidth=1, label='Positive Attribution'),
+            Patch(facecolor='white', alpha=0.8, edgecolor='black', linewidth=1, label='Original MRI'),
+        ]
+    else:
+        legend_elements = [
+            Patch(facecolor='red', alpha=0.8, edgecolor='white', linewidth=1, label='Positive Attribution'),
+            Patch(facecolor='blue', alpha=0.8, edgecolor='white', linewidth=1, label='Negative Attribution'),
+            Patch(facecolor='white', alpha=0.8, edgecolor='black', linewidth=1, label='Original MRI'),
+        ]
 
     legend = ax.legend(handles=legend_elements,
                        loc='upper right',
@@ -195,20 +218,18 @@ def simpleDualGrid(input_volume, explanation, save_path=None, dpi=150, alpha=0.4
                        fontsize=11,
                        framealpha=0.95,
                        frameon=True,
-                       labelcolor='white')  # Make legend text white
-
+                       labelcolor='white')
     legend.get_frame().set_facecolor('black')
     legend.get_frame().set_edgecolor('white')
     legend.get_frame().set_linewidth(2)
 
-    # Add comprehensive statistics section with black text
+    # Add statistics
     stats_text = f"""
-    Explanation Statistics:
+    Explanation Statistics ({method_name}):
     • Range: [{exp_np.min():.4f}, {exp_np.max():.4f}]
     • Mean Absolute: {np.abs(exp_np).mean():.4f}
     • Std Dev: {exp_np.std():.4f}
     • Positive %: {(exp_np > 0).sum() / exp_np.size:.1%}
-    • Negative %: {(exp_np < 0).sum() / exp_np.size:.1%}
 
     Input Statistics:
     • Range: [{input_np.min():.2f}, {input_np.max():.2f}]
@@ -216,62 +237,55 @@ def simpleDualGrid(input_volume, explanation, save_path=None, dpi=150, alpha=0.4
     • Slices: {input_np.shape[0]} total, {min(slices_per_image, input_np.shape[0])} shown
     """
 
-    # Create text box for statistics with white text on black background
     props = dict(boxstyle='round', facecolor='white', alpha=0.8, edgecolor='black', linewidth=1.5)
     ax.text(0.02, 0.98, stats_text,
             transform=ax.transAxes,
             fontsize=10,
-            color='black',  # Black text for contrast
+            color='black',
             verticalalignment='top',
             bbox=props,
             fontfamily='monospace')
 
-    # Add color intensity bar with white labels
+    # Add colorbar
     fig.subplots_adjust(bottom=0.15)
-    cax = fig.add_axes([0.25, 0.05, 0.5, 0.02])  # [left, bottom, width, height]
-
-    # Set dark background for colorbar
+    cax = fig.add_axes([0.25, 0.05, 0.5, 0.02])
     cax.set_facecolor('black')
 
-    colors = ['blue', 'white', 'red']
-    cmap = mcolors.LinearSegmentedColormap.from_list('attribution', colors)
-
-    norm = mcolors.Normalize(vmin=-exp_max, vmax=exp_max)
     cbar = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap),
                         cax=cax, orientation='horizontal')
 
-    # White text for colorbar
-    cbar.set_label('Attribution Intensity (Blue=Negative, Red=Positive)', 
-                   fontsize=12, labelpad=10, color='white')
-    cbar.ax.tick_params(labelsize=10, colors='white')
+    if np.min(exp_np) >= 0:
+        cbar_label = f'{method_name} Attribution Intensity'
+    else:
+        cbar_label = 'Attribution Intensity (Blue=Negative, Red=Positive)'
 
-    # Set colorbar axis colors to white
+    cbar.set_label(cbar_label, fontsize=12, labelpad=10, color='white')
+    cbar.ax.tick_params(labelsize=10, colors='white')
     cax.xaxis.label.set_color('white')
     cax.tick_params(axis='x', colors='white')
 
-    # Add grid lines for better slice separation
+    # Add grid lines
     for i in range(1, rows):
         ax.axhline(y=i * slice_height, color='white', linewidth=0.7, alpha=0.4, linestyle='--')
     for i in range(1, cols):
         ax.axvline(x=i * slice_width, color='white', linewidth=0.7, alpha=0.4, linestyle='--')
 
-    # Set figure background to black for better contrast with the grid
+    # Set dark background
     fig.patch.set_facecolor('black')
     ax.set_facecolor('black')
 
+    # Save figure
     if save_path is not None:
         save_path = Path(save_path)
         save_path.parent.mkdir(parents=True, exist_ok=True)
 
         if save_path.exists():
-            from datetime import datetime
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             save_path = save_path.parent / f"{save_path.stem}_{timestamp}{save_path.suffix}"
 
         plt.savefig(save_path, dpi=dpi, bbox_inches='tight', 
-                    facecolor='black', edgecolor='none',  # Black background for saved image
+                    facecolor='black', edgecolor='none',
                     transparent=False)
-        print(f"Figure saved to: {save_path}")
 
     return fig, save_path if save_path else None
 
@@ -319,7 +333,7 @@ def main():
     generator.load_state_dict(torch.load("./weights/segmentator_segformer_hyperparams_SegFormer3D.pth", map_location=device))
     generator = generator.eval()
     lime_explainer = LIMEExplainer(
-        n_samples=50,           # Number of LIME samples
+        n_samples=100,           # Number of LIME samples
         batch_size=1,           # Batch size for processing
         segmentation_mode=True,  # Vital for 3D segmentation
     )
@@ -331,9 +345,9 @@ def main():
         return
 
     print(f"\nLoading sample {args.sample_idx}...")
-    voxels, mask = getSampleFromDataloader(data_loader, args.sample_idx)
+    voxels, _ = getSampleFromDataloader(data_loader, args.sample_idx)
     voxels = voxels.to(device)
-    feature_mask = createFeatureMask(voxels, block_size=16)
+    feature_mask = createFeatureMask(voxels, block_size=6)
     feature_mask = feature_mask.to(device)
     mask = feature_mask
     # mask = mask.to(device)
@@ -346,9 +360,27 @@ def main():
         feature_mask=mask,
         return_input_shape=True,   # Return same shape as input
     )
-    print(f"Explanation shape: {explanation.shape}")
-    print(f"Explanation range: [{explanation.min():.6f}, {explanation.max():.6f}]")
-    simpleDualGrid(voxels, explanation, save_path=f"./diagrams/SegFormer3D_kneemridataset_lime_explanation_{args.sample_idx}.png", dpi=250, alpha=1.0)
+    print("\nExplanation Statistics (LIME):")
+    print(f"  Shape: {explanation.shape}")
+    print(f"  Range: [{explanation.min():.6f}, {explanation.max():.6f}]")
+    print(f"  Mean: {explanation.mean():.6f}")
+    print(f"  Std: {explanation.std():.6f}")
+    simpleDualGrid(voxels, explanation, "LIME", save_path=f"./diagrams/SegFormer3D_kneemridataset_lime_explanation_{args.sample_idx}.png", dpi=250, alpha=1.0)
+
+    explainer = SaliencyExplainer(absolute=True)
+
+    explanation = explainer.explain(
+        model=generator,
+        input_tensor=voxels,
+        target_class=None,
+    )
+
+    print("\nExplanation Statistics (Saliency):")
+    print(f"  Shape: {explanation.shape}")
+    print(f"  Range: [{explanation.min():.6f}, {explanation.max():.6f}]")
+    print(f"  Mean: {explanation.mean():.6f}")
+    print(f"  Std: {explanation.std():.6f}")
+    simpleDualGrid(voxels, explanation, "Saliency", save_path=f"./diagrams/SegFormer3D_kneemridataset_saliency_explanation_{args.sample_idx}.png", dpi=250, alpha=1.0)
 
 
 if __name__ == "__main__":
