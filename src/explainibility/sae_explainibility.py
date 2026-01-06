@@ -39,24 +39,36 @@ def train_sae(
     num_of_epochs: int = 10,
     batch_size: int = 8,
     learning_rate: float = 0.001,
+    start_max_hidden_features: int = None,
 ):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if not start_max_hidden_features:
+        start_max_hidden_features = min(2 * max_number_of_hidden_features, hidden_size)
 
     encoder = SaeEncoder(
         input_size=input_size,
         hidden_size=hidden_size,
-        max_hidden_features=max_number_of_hidden_features,
+        max_hidden_features=start_max_hidden_features,
     ).to(device)
+    hidden_feature_size_per_epoch = np.linspace(
+        start_max_hidden_features, max_number_of_hidden_features, num_of_epochs // 2
+    )
+    hidden_feature_size_per_epoch = np.concatenate(
+        [
+            hidden_feature_size_per_epoch,
+            num_of_epochs // 2 * [max_number_of_hidden_features],
+        ],
+    )
     decoder = SaeDecoder(hidden_size=hidden_size, output_size=input_size).to(device)
 
     encoder_optimizer = optim.Adam(encoder.parameters(), lr=learning_rate)
     decoder_optimizer = optim.Adam(decoder.parameters(), lr=learning_rate)
 
     encoder_scheduler = optim.lr_scheduler.StepLR(
-        encoder_optimizer, step_size=1, gamma=0.85
+        encoder_optimizer, step_size=1, gamma=0.9
     )
     decoder_scheduler = optim.lr_scheduler.StepLR(
-        decoder_optimizer, step_size=1, gamma=0.85
+        decoder_optimizer, step_size=1, gamma=0.9
     )
 
     # labels = [dataset[i][1] for i in range(len(dataset))]
@@ -119,6 +131,12 @@ def train_sae(
         print(f"Activation rate: {activation_rate:.4f}")
         encoder_scheduler.step()
         decoder_scheduler.step()
+        encoder.max_hidden_features = int(
+            hidden_feature_size_per_epoch[
+                min(epoch, len(hidden_feature_size_per_epoch) - 1)
+            ]
+        )
+        print("current max hidden features:", encoder.max_hidden_features)
     return encoder
 
 
@@ -287,7 +305,14 @@ if __name__ == "__main__":
     model = model.encoder
 
     sae_model = explain_model_with_sae(
-        model, dataset, model.fc, 1024, 8 * 4096, 4 * 4096
+        model,
+        dataset,
+        model.fc,
+        1024,
+        8 * 4096,
+        4 * 4096,
+        num_of_epochs=25,
+        learning_rate=0.004,
     )
 
     a, b, c = sae_statistics(sae_model, model, model.fc, dataset)
