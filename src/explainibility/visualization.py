@@ -255,7 +255,11 @@ def display_grad_cam_explanattions(
     device: torch.device | None = None,
     display: bool = True,
     save_path: Path | None = None,
+    in_slices: bool = False,
 ) -> None:
+    displaying_function = display_explainibility
+    if in_slices:
+        displaying_function = display_explainibility_in_slices
     if not save_path:
         save_path = Path("")
     grad_cam_atribution = (
@@ -268,7 +272,7 @@ def display_grad_cam_explanattions(
         .cpu()
     )
 
-    display_explainibility(
+    displaying_function(
         example.squeeze(0),
         grad_cam_atribution,
         atributions_minimal_value=get_ideal_minimal_atribution_value(
@@ -287,7 +291,7 @@ def display_grad_cam_explanattions(
         .detach()
         .cpu()
     )
-    display_explainibility(
+    displaying_function(
         example.squeeze(0),
         guided_grad_cam_atribution,
         atributions_minimal_value=get_ideal_minimal_atribution_value(
