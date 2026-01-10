@@ -11,7 +11,7 @@ import torchio as tio
 from collections import defaultdict
 from src.explainibility.visualization import display_sae_features
 from pathlib import Path
-from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
 
 
 def kl_divergence(p, q, eps=1e-6):
@@ -65,10 +65,10 @@ def train_sae(
     decoder_optimizer = optim.Adam(decoder.parameters(), lr=learning_rate)
 
     encoder_scheduler = optim.lr_scheduler.StepLR(
-        encoder_optimizer, step_size=1, gamma=0.9
+        encoder_optimizer, step_size=1, gamma=0.95
     )
     decoder_scheduler = optim.lr_scheduler.StepLR(
-        decoder_optimizer, step_size=1, gamma=0.9
+        decoder_optimizer, step_size=1, gamma=0.95
     )
 
     # labels = [dataset[i][1] for i in range(len(dataset))]
@@ -149,6 +149,7 @@ def explain_model_with_sae(
     max_number_of_hidden_features: int,
     num_of_epochs: int = 15,
     learning_rate: float = 0.007,
+    start_max_hidden_features: int = None,
 ):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -173,6 +174,7 @@ def explain_model_with_sae(
         max_number_of_hidden_features,
         num_of_epochs=num_of_epochs,
         learning_rate=learning_rate,
+        start_max_hidden_features=start_max_hidden_features,
     )
 
 
@@ -266,11 +268,12 @@ def get_minimal_tree_from_sae_model(
 
     tree_precisions = {}
     for tree_depth in range(5, 26):
-        tree = DecisionTreeClassifier(max_depth=tree_depth)
+        tree = RandomForestClassifier(max_depth=tree_depth)
         tree.fit(np.vstack(hidden_representations), representations_diagnosis)
         tree_precisions[tree_depth] = (
             tree.score(np.vstack(hidden_representations), representations_diagnosis),
             tree,
+            np.argsort(tree.feature_importances_)[-10:][::-1],
         )
     return tree_precisions
 
@@ -310,7 +313,7 @@ if __name__ == "__main__":
         model.fc,
         1024,
         8 * 4096,
-        4 * 4096,
+        12000,
         num_of_epochs=25,
         learning_rate=0.004,
     )
@@ -333,7 +336,7 @@ if __name__ == "__main__":
     tfidf_df = pd.DataFrame(tfidf_matrix, index=df.index, columns=df.columns)
 
     # 3. Get Top 5 Discriminative Features for each class
-    for class_name in tfidf_df.index:
+    for class_name in sorted(tfidf_df.index):
         print(f"\n--- Top features for {class_name} ---")
         top_features = tfidf_df.loc[class_name].nlargest(10)
         print(top_features)
