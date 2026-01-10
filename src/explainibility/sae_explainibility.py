@@ -11,9 +11,7 @@ import torchio as tio
 from collections import defaultdict
 from src.explainibility.visualization import display_sae_features
 from pathlib import Path
-from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier
-import numpy as np
 
 
 def kl_divergence(p, q, eps=1e-6):
