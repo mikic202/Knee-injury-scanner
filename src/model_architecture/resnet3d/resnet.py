@@ -122,7 +122,7 @@ class ResNet3D(nn.Module):
         return x
 
 
-def get_resnet3d(num_classes: int = 3, in_channels: int = 1, layers: Sequence[int] = (2, 2, 2, 2),
+def get_resnet3d(num_classes: int = 3, in_channels: int = 1, layers: Sequence[int] = (1, 1, 1, 1),
                  device: Optional[torch.device] = None, dropout_rate: float = 0.5) -> nn.Module:
     """
     Tworzy ResNet3D podobny do ResNet18 (wariant 3D). Nie wspiera 'pretrained'.

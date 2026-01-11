@@ -18,18 +18,19 @@ from scipy.ndimage import gaussian_filter
 from sklearn.metrics import confusion_matrix, classification_report, precision_recall_fscore_support
 import matplotlib.pyplot as plt
 import seaborn as sns
-from src.model_architecture.resnet3d.resnet import get_resnet3d, FocalLoss
-from src.model_training.training_helpers.loggers import WandbLogger
-
-
+import torchio as tio
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from src.model_architecture.resnet3d.resnet import get_resnet3d, FocalLoss
+from src.model_training.training_helpers.loggers import WandbLogger
+
 class PCK3DDataset(Dataset):
-    def __init__(self, root: str, extensions=(".pck",), target_shape: Tuple[int,int,int]=(32,128,128),
+    def __init__(self, root: str, extensions=(".pck",), target_shape: Tuple[int,int,int]=(64,64,64),
                  label_fn: Optional[Callable[[Path], int]] = None,
-                 labels_dict: Optional[dict] = None):
+                 labels_dict: Optional[dict] = None,
+                 transform: Optional[tio.transforms.Transform] = None):
         self.root = Path(root)
         self.paths = []
         for ext in extensions:
@@ -37,6 +38,7 @@ class PCK3DDataset(Dataset):
         if not self.paths:
             raise FileNotFoundError(f"No files with {extensions} under {root}")
         self.target_shape = target_shape
+        self.transform = transform
         if labels_dict is not None:
             self.label_fn = lambda p: labels_dict.get(p.name, -1)
         else:
@@ -94,11 +96,23 @@ class PCK3DDataset(Dataset):
         td, th, tw = self.target_shape
 
         arr = np.ascontiguousarray(arr, dtype=np.float32)
-        t = torch.tensor(arr, dtype=torch.float32).unsqueeze(0).unsqueeze(0)  # shape (1,1,D,H,W)
+        t5 = torch.tensor(arr, dtype=torch.float32).unsqueeze(0).unsqueeze(0)  # (1,1,D,H,W)
 
-        t = F.interpolate(t, size=(td, th, tw), mode="trilinear", align_corners=False)
-        t = t.squeeze(0)  # shape (1,td,th,tw)
-        return t  # (C=1, D, H, W)
+        if self.transform is not None:
+            # Apply TorchIO transform. TorchIO expects (C, W, H, D).
+            t4 = t5.squeeze(0)  # (1,D,H,W)
+            t4_whd = t4.permute(0, 3, 2, 1)  # (1,W,H,D)
+            image = tio.Image(tensor=t4_whd, type=tio.INTENSITY)
+            subject = tio.Subject(image=image)
+            transformed = self.transform(subject)
+            t4_whd_out = transformed.image.tensor  # (1,W,H,D)
+            t4_out = t4_whd_out.permute(0, 3, 2, 1)  # back to (1,D,H,W)
+            return t4_out
+        else:
+            # resize to target shape using interpolate
+            t5 = F.interpolate(t5, size=(td, th, tw), mode="trilinear", align_corners=False)
+            t4 = t5.squeeze(0)  # (1,td,th,tw)
+            return t4  # (C=1, D, H, W)
 
     def __getitem__(self, idx):
         p = self.paths[idx]
@@ -328,6 +342,7 @@ def main():
     parser.add_argument("--weight-decay", type=float, default=1e-4, help="Weight decay for Adam optimizer")
     parser.add_argument("--dropout", type=float, default=0.5, help="Dropout rate in FC layer")
     parser.add_argument("--patience", type=int, default=7, help="Patience for ReduceLROnPlateau scheduler")
+    parser.add_argument("--early-stopping", type=int, default=15, help="Early stopping patience (stop if no improvement for N epochs, 0=disabled)")
     parser.add_argument("--weighted-loss", action="store_true", default=True, 
                        help="Use weighted CrossEntropyLoss to handle imbalanced classes (default: True)")
     parser.add_argument("--no-weighted-loss", dest="weighted_loss", action="store_false",
@@ -336,7 +351,7 @@ def main():
                        help="Use Focal Loss instead of weighted CrossEntropyLoss (for harder examples)")
     parser.add_argument("--focal-gamma", type=float, default=2.0,
                        help="Gamma parameter for Focal Loss (higher = more focus on hard examples)")
-    parser.add_argument("--target-shape", nargs=3, type=int, default=(96,128,128), help="D H W")
+    parser.add_argument("--target-shape", nargs=3, type=int, default=(64,64,64), help="D H W")
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--device", type=str, default=None, help="cuda or cpu (auto if not set)")
     parser.add_argument("--save-dir", type=str, default="checkpoints")
@@ -360,26 +375,30 @@ def main():
     print(f"[DEBUG] Loaded {len(labels_dict)} labels from {args.metadata_csv} (label column: {args.label_column})")
     # ----
 
-    wandb_logger = None
-    if args.wandb_project:
-        wandb_config = {
-            "model": "resnet3d",
-            "epochs": args.epochs,
-            "batch": args.batch,
-            "lr": args.lr,
-            "weight_decay": args.weight_decay,
-            "dropout": args.dropout,
-            "patience": args.patience,
-            "focal_loss": args.focal_loss,
-            "focal_gamma": args.focal_gamma,
-            "weighted_loss": args.weighted_loss,
-            "target_shape": args.target_shape,
-        }
-        wandb_logger = WandbLogger(project_name=args.wandb_project, run_name=args.wandb_run_name, config=wandb_config)
+    # Enable W&B logging by default (no flag required)
+    wandb_config = {
+        "model": "resnet3d",
+        "epochs": args.epochs,
+        "batch": args.batch,
+        "lr": args.lr,
+        "weight_decay": args.weight_decay,
+        "dropout": args.dropout,
+        "patience": args.patience,
+        "focal_loss": args.focal_loss,
+        "focal_gamma": args.focal_gamma,
+        "weighted_loss": args.weighted_loss,
+        "target_shape": args.target_shape,
+    }
+    wandb_logger = WandbLogger(project_name=(args.wandb_project or "knee-scanner"), run_name=args.wandb_run_name, config=wandb_config)
 
     if args.infer:
         p = Path(args.infer)
-        ds_tmp = PCK3DDataset(str(p.parent), target_shape=tuple(args.target_shape), labels_dict=labels_dict)
+        ds_tmp = PCK3DDataset(
+            str(p.parent),
+            target_shape=tuple(args.target_shape),
+            labels_dict=labels_dict,
+            transform=tio.transforms.Compose([tio.transforms.Resize(tuple(args.target_shape))]),
+        )
         arr = ds_tmp._load_pickle(p)
         t = ds_tmp._to_tensor_resized(arr).unsqueeze(0).to(device)
         ckpt = sorted(Path(args.save_dir).glob("resnet3d_*.pt"))
@@ -415,7 +434,17 @@ def main():
     if not args.data:
         raise SystemExit("Provide --data when training or evaluating")
 
-    dataset = PCK3DDataset(args.data, target_shape=tuple(args.target_shape), labels_dict=labels_dict)
+    # Ensure consistent 64x64x64 input using TorchIO Resize
+    dataset_transform = tio.transforms.Compose([
+        tio.transforms.Resize(tuple(args.target_shape)),
+    ])
+
+    dataset = PCK3DDataset(
+        args.data,
+        target_shape=tuple(args.target_shape),
+        labels_dict=labels_dict,
+        transform=dataset_transform,
+    )
     n = len(dataset)
     all_labels = [dataset.label_fn(dataset.paths[i]) for i in range(n)]
     print(f"[DEBUG] Total samples: {n}")
@@ -486,6 +515,7 @@ def main():
 
     best_val_loss = float('inf')
     best_epoch = 0
+    epochs_without_improvement = 0
 
     for epoch in range(1, args.epochs + 1):
         train_loss, train_acc = train_one_epoch(model, train_loader, optimizer, criterion, device)
@@ -511,10 +541,17 @@ def main():
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_epoch = epoch
+            epochs_without_improvement = 0
             if not args.no_save:
                 best_model_path = Path(args.save_dir) / "resnet3d_best.pt"
                 torch.save(model.state_dict(), str(best_model_path))
                 print(f"  → Saved best model (val_loss={val_loss:.4f}) to {best_model_path}")
+        else:
+            epochs_without_improvement += 1
+            if args.early_stopping > 0 and epochs_without_improvement >= args.early_stopping:
+                print(f"\n⚠ Early stopping triggered: no improvement for {args.early_stopping} epochs")
+                print(f"Best val_loss={best_val_loss:.4f} at epoch {best_epoch}")
+                break
         
         if not args.no_save:
             fname = Path(args.save_dir) / f"resnet3d_epoch{epoch:03d}.pt"
