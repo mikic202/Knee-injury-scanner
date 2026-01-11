@@ -6,16 +6,14 @@ from pathlib import Path
 from skimage import measure
 import plotly.graph_objects as go
 import sys
-import os
-
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.model_architecture.resnet3d.resnet import get_resnet3d
 from lime import lime_image
 from skimage.segmentation import mark_boundaries
-import matplotlib.pyplot as plt
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 
 def explain_lime(model, volume_3d, device, num_samples=500):

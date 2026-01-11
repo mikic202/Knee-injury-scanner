@@ -1,5 +1,4 @@
 """ResNet3D training and inference script for 3D medical images."""
-
 import pickle
 from pathlib import Path
 import sys
@@ -19,12 +18,14 @@ from sklearn.metrics import confusion_matrix, classification_report, precision_r
 import matplotlib.pyplot as plt
 import seaborn as sns
 import torchio as tio
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+
 
 from src.model_architecture.resnet3d.resnet import get_resnet3d, FocalLoss
 from src.model_training.training_helpers.loggers import WandbLogger
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 class PCK3DDataset(Dataset):
     def __init__(self, root: str, extensions=(".pck",), target_shape: Tuple[int,int,int]=(64,64,64),
