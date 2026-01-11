@@ -7,6 +7,7 @@ import time
 import os
 import numpy as np
 from src.model_training.training_helpers.loggers import WandbLogger
+from sklearn.model_selection import train_test_split
 
 NUM_EPOCHS = 3
 BATCH_SIZE = 2
@@ -31,9 +32,11 @@ dataset = KneeScans3DDataset(
     datset_filepath="/media/mikic202/Nowy/uczelnia/semestr_9/SIWY/datasets/kneemri",
     transform=dataset_transform,
 )
+train_dataset, val_dataset = train_test_split(dataset, test_size=0.1, random_state=42)
 train_dataloader = torch.utils.data.DataLoader(
     dataset, batch_size=BATCH_SIZE, shuffle=True
 )
+val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=1, shuffle=False)
 
 data_logger = WandbLogger(
     "knee-scanner",
@@ -81,16 +84,19 @@ test_dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=Fal
 predictions = []
 real = []
 
-for batch, classes in test_dataloader:
+for batch, classes in val_dataloader:
     batch = batch.to(device)
     outputs = model(batch.float())
     _, predicted = torch.max(outputs.data, 1)
+    print(f"Outputs: {outputs}, Predicted: {predicted}, Real: {classes}")
     predictions.append(predicted.item())
     real.append(classes.item())
     # print(f"True: {classes.item()}, Predicted: {predicted.item()}")
 
 np.save(f"models/basic_clasifier_predictions_{time.time()}.npy", predictions)
 np.save(f"models/basic_clasifier_real_{time.time()}.npy", real)
+
+print("Model accuracy:", np.sum(np.array(predictions) == np.array(real)) / len(real))
 
 torch.save(model.state_dict(), f"models/basic_clasifier_model_{time.time()}.pth")
 
