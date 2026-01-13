@@ -7,17 +7,16 @@ from skimage import measure
 import plotly.graph_objects as go
 import sys
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
-
 from src.model_architecture.resnet3d.resnet import get_resnet3d
 from git_submodules.PyAiWrap.pyaiwrap.xai import LIMEExplainer
 from src.explainibility.basic_gradient_based_methods import (
     explain_prediction_with_integrated_gradients,
     explain_prediction_with_saliency,
 )
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 @st.cache_resource
 def get_lime_explainer():
