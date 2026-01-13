@@ -337,7 +337,7 @@ def summarize_sae_trees(
     for tree_depth in sorted(tree_precisions.keys()):
         precision, _, top_features = tree_precisions[tree_depth]
         top_features_str = ", ".join(str(f) for f in top_features)
-        print(f"    {tree_depth}    |  {precision:.4f}  | {top_features_str}")
+        print(f"    {tree_depth:<5}|  {precision:.4f}  | {top_features_str}")
         popular_features.extend(top_features)
 
     most_popular_features = Counter(popular_features).most_common(
