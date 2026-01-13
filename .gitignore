@@ -24,3 +24,7 @@ datasets/
 models/
 wandb/
 *.png
+
+LIME/**
+Saliency/**
+GradCAM/**
