@@ -17,6 +17,7 @@ from src.explainibility.grad_cam_methods import (
     explain_prediction_with_guided_grad_cam,
 )
 from pathlib import Path
+from collections import Counter
 
 
 def display_explainibility(
@@ -98,7 +99,7 @@ def display_explainibility(
 def display_explainibility_in_slices(
     example_values: np.ndarray,
     attributions_values: np.ndarray,
-    example_minimal_value: float = 100.0,
+    example_minimal_value: float = 0.0,
     atributions_minimal_value: float = 0.0001,
     figsize: tuple[int, int] = (12, 12),
     display: bool = True,
@@ -325,3 +326,23 @@ def display_sae_features(
     if display:
         plt.tight_layout()
         plt.show()
+
+
+def summarize_sae_trees(
+    tree_precisions: dict, most_popular_to_display: int = 10
+) -> None:
+    popular_features = []
+    print("Tree Depth| Accuracy | Top Features Used")
+    print("-------------------------------------------")
+    for tree_depth in sorted(tree_precisions.keys()):
+        precision, _, top_features = tree_precisions[tree_depth]
+        top_features_str = ", ".join(str(f) for f in top_features)
+        print(f"    {tree_depth}    |  {precision:.4f}  | {top_features_str}")
+        popular_features.extend(top_features)
+
+    most_popular_features = Counter(popular_features).most_common(
+        most_popular_to_display
+    )
+    print("\nMost Popular Features Across All Trees:")
+    for feature, count in most_popular_features:
+        print(f"Feature {feature}: used {count} times")
