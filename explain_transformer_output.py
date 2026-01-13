@@ -367,6 +367,7 @@ def main():
     print(f"  Std: {explanation.std():.6f}")
     simpleDualGrid(voxels, explanation, "LIME", save_path=f"./diagrams/SegFormer3D_kneemridataset_lime_explanation_{args.sample_idx}.png", dpi=250, alpha=1.0)
 
+    saveRawData(voxels, explanation, args.sample_idx, output_dir="./LIME/")
     explainer = SaliencyExplainer(absolute=True)
 
     explanation = explainer.explain(
@@ -382,6 +383,7 @@ def main():
     print(f"  Std: {explanation.std():.6f}")
     simpleDualGrid(voxels, explanation, "Saliency", save_path=f"./diagrams/SegFormer3D_kneemridataset_saliency_explanation_{args.sample_idx}.png", dpi=250, alpha=1.0)
 
+    saveRawData(voxels, explanation, args.sample_idx, output_dir="./Saliency/")
     explainer = GradCAMExplainer()
 
     explanation = explainer.explain(
@@ -396,6 +398,8 @@ def main():
     print(f"  Mean: {explanation.mean():.6f}")
     print(f"  Std: {explanation.std():.6f}")
     simpleDualGrid(voxels, explanation, "GradCAM", save_path=f"./diagrams/SegFormer3D_kneemridataset_gradcam_explanation_{args.sample_idx}.png", dpi=250, alpha=1.0)
+
+    saveRawData(voxels, explanation, args.sample_idx, output_dir="./GradCAM/")
 
 
 if __name__ == "__main__":

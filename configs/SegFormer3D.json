@@ -1,5 +1,5 @@
 {
-    "BATCH_SIZE": 16,
+    "BATCH_SIZE": 2,
     "DATA_PATH": "./data",
     "HYPERPARAMS_ID": "SegFormer3D",
     "ARCHITECTURE_ID": "SegFormer3D",
