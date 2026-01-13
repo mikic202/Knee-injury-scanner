@@ -223,29 +223,6 @@ def simpleDualGrid(input_volume, explanation, method_name="XAI", save_path=None,
     legend.get_frame().set_edgecolor('white')
     legend.get_frame().set_linewidth(2)
 
-    # Add statistics
-    stats_text = f"""
-    Explanation Statistics ({method_name}):
-    • Range: [{exp_np.min():.4f}, {exp_np.max():.4f}]
-    • Mean Absolute: {np.abs(exp_np).mean():.4f}
-    • Std Dev: {exp_np.std():.4f}
-    • Positive %: {(exp_np > 0).sum() / exp_np.size:.1%}
-
-    Input Statistics:
-    • Range: [{input_np.min():.2f}, {input_np.max():.2f}]
-    • Mean: {input_np.mean():.2f}
-    • Slices: {input_np.shape[0]} total, {min(slices_per_image, input_np.shape[0])} shown
-    """
-
-    props = dict(boxstyle='round', facecolor='white', alpha=0.8, edgecolor='black', linewidth=1.5)
-    ax.text(0.02, 0.98, stats_text,
-            transform=ax.transAxes,
-            fontsize=10,
-            color='black',
-            verticalalignment='top',
-            bbox=props,
-            fontfamily='monospace')
-
     # Add colorbar
     fig.subplots_adjust(bottom=0.15)
     cax = fig.add_axes([0.25, 0.05, 0.5, 0.02])
