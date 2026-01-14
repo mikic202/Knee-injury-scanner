@@ -2,7 +2,6 @@ import streamlit as st
 import pickle
 import numpy as np
 import torch
-from pathlib import Path
 from skimage import measure
 import plotly.graph_objects as go
 import sys
