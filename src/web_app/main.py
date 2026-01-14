@@ -2,10 +2,10 @@ import streamlit as st
 import pickle
 import numpy as np
 import torch
-from pathlib import Path
 from skimage import measure
 import plotly.graph_objects as go
 import sys
+import logging
 
 from src.model_architecture.resnet3d.resnet import get_resnet3d
 from git_submodules.PyAiWrap.pyaiwrap.xai import LIMEExplainer
@@ -14,18 +14,24 @@ from src.explainibility.basic_gradient_based_methods import (
     explain_prediction_with_saliency,
 )
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+from src.web_app.config import AppConfig
+
+if str(AppConfig.PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(AppConfig.PROJECT_ROOT))
+
+
+logging.basicConfig(
+    level=getattr(logging, AppConfig.LOG_LEVEL, logging.INFO),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 @st.cache_resource
 def get_lime_explainer():
     return LIMEExplainer(segmentation_mode=False)
 
 def explain_lime(model, volume_3d, device, target_class=None):
-    """
-    Wyjaśnienie LIME dla 3D volumenu z użyciem PyAiWrap.
-    """
+    logger.info("Starting LIME explanation")
     explainer = get_lime_explainer()
     model.eval()
     if isinstance(volume_3d, np.ndarray):
@@ -45,6 +51,7 @@ def explain_lime(model, volume_3d, device, target_class=None):
     lime_explanation = explainer.explain(model, tensor, target=target_class)
     lime_map = lime_explanation.cpu().squeeze(0).squeeze(0).numpy()
     d_idx = lime_map.shape[0] // 2
+    logger.info(f"LIME complete. Slice index: {d_idx}")
     slice_lime = lime_map[d_idx]
     slice_lime = (slice_lime - slice_lime.min()) / (slice_lime.max() - slice_lime.min() + 1e-8)
     return slice_lime, {"target_class": target_class}
@@ -100,16 +107,19 @@ def explain_saliency_stream(model, volume_3d, device):
 
 @st.cache_resource
 def load_model(checkpoint_path: str):
-    """Załaduj checkpoint ResNet3D."""
+    logger.info(f"Loading model from: {checkpoint_path}")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = get_resnet3d(num_classes=3, in_channels=1, device=device)
     try:
         model.load_state_dict(torch.load(checkpoint_path, map_location=device))
         model.eval()
         st.success(f"✓ Model załadowany z: {checkpoint_path}")
+        logger.info("Model loaded successfully")
         return model, device
     except Exception as e:
-        st.error(f"✗ Błąd przy załadowaniu modelu: {e}")
+        msg = f"✗ Błąd przy załadowaniu modelu: {e}"
+        st.error(msg)
+        logger.error(msg)
         return None, None
 
 
@@ -128,6 +138,7 @@ def _normalize_for_display(arr):
 
 def _plot_volume_3d_plotly(volume, level):
     if measure is None or go is None:
+        logger.warning("Missing dependencies for 3D plot (skimage, plotly)")
         return None
 
     vol = np.asarray(volume).astype(np.float32)
@@ -160,12 +171,6 @@ def _plot_volume_3d_plotly(volume, level):
 
 
 def predict_knee_diagnosis(model, device, volume_3d: np.ndarray, target_shape=(32, 128, 128)):
-    """
-    Przewiduj diagnozę na podstawie 3D volumenu.
-    
-    Returns:
-        (predicted_class, probabilities_dict)
-    """
     if model is None:
         return None, {}
     
@@ -205,7 +210,7 @@ def get_diagnosis_text(class_idx: int) -> str:
         1: "⚠️ **ACL częściowo uszkodzone** — więzadło krzyżowe ma częściowe zerwanie. Zalecana konsultacja lekarza.",
         2: "🔴 **ACL całkowicie zerwane** — więzadło krzyżowe jest w pełni zerwane. Wskazana operacja.",
     }
-    return diagnoses.get(class_idx, "❓ Nieznany wynik")
+    return diagnoses.get(class_idx, "Nieznany wynik")
 
 
 def main():
@@ -213,7 +218,7 @@ def main():
     st.title("🏥 Knee Injury Scanner — AI Diagnosis")
     st.write("Analiza zdjęć MRI kolana przy użyciu sieci neuronowej ResNet3D")
     
-    model_path = "/home/dominika/Projekty_MGR/Knee-injury-scanner/checkpoints/resnet3d_best_10_01_16:49.pt"
+    model_path = AppConfig.MODEL_PATH
     target_shape = (32, 128, 128)
     
     model, device = load_model(model_path)
@@ -236,7 +241,7 @@ def main():
         if isinstance(data, np.ndarray):
             arr = data
         elif isinstance(data, dict):
-            st.write("Klucze słownika:", list(data.keys()))
+            logger.debug(f"Pck file dictionary keys: {list(data.keys())}")
             for key in ("image", "volume", "img", "data"):
                 if key in data:
                     arr = data[key]
@@ -245,6 +250,7 @@ def main():
 
         if arr is None:
             st.write("Nie znaleziono tablicy 2D/3D w pliku .pck — pokażę reprezentację:")
+            logger.warning("Could not find array in pck file")
             st.write(repr(data)[:1000])
         else:
             arr = np.asarray(arr).astype(np.float32)
@@ -276,21 +282,23 @@ def main():
                                     st.plotly_chart(fig, use_container_width=True)
                             except Exception as e:
                                 st.error(f"Błąd przy tworzeniu 3D: {e}")
+                                logger.error(f"Error creating 3D visualization: {e}")
             
             st.markdown("---")
             
             st.header("🔬 Diagnoza AI")
 
-            # --- AI session state ---
             if "ai_result" not in st.session_state:
                 st.session_state.ai_result = None
 
             if model is not None and device is not None:
                 if st.button("🚀 Uruchom analizę", key="diagnose_btn"):
                     with st.spinner("Analizuję obraz..."):
+                        logger.info("Starting diagnosis prediction")
                         predicted_class, probs = predict_knee_diagnosis(
                             model, device, arr, target_shape=target_shape
                         )
+                        logger.info(f"Diagnosis prediction done. Class: {predicted_class}")
                     st.session_state.ai_result = (predicted_class, probs)
 
             if st.session_state.ai_result:
@@ -330,7 +338,6 @@ def main():
                            f"{val:.2%}", ha='center', va='bottom', fontweight='bold')
                 st.pyplot(fig)
 
-                # --- XAI SECTION ---
                 st.header("🧠 Wyjaśnialność (XAI)")
                 if "xai_result" not in st.session_state:
                     st.session_state.xai_result = None
@@ -346,6 +353,7 @@ def main():
 
                     if st.session_state.xai_method == "lime" and st.session_state.xai_result is None:
                         with st.spinner("Obliczanie LIME..."):
+                            logger.info("Computing LIME on demand")
                             lime_img, pred_dict = explain_lime(model, arr, device)
                             st.session_state.xai_result = ("LIME", lime_img, pred_dict)
 
@@ -365,6 +373,7 @@ def main():
 
                 if st.session_state.xai_method and st.session_state.xai_result is None:
                     with st.spinner("Obliczanie wyjaśnienia..."):
+                        logger.info(f"Computing XAI: {st.session_state.xai_method}")
                         if st.session_state.xai_method == "lime":
                             img, pred_dict = explain_lime(model, arr, device)
                             st.session_state.xai_result = ("LIME", img, pred_dict)
