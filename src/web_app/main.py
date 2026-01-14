@@ -10,7 +10,7 @@ import logging
 from src.model_architecture.resnet3d.resnet import get_resnet3d
 from git_submodules.PyAiWrap.pyaiwrap.xai import LIMEExplainer
 from src.explainibility.basic_gradient_based_methods import (
-    explain_prediction_with_integrated_gradients,
+    explain_prediction_with_input_x_gradient,
     explain_prediction_with_saliency,
 )
 
@@ -71,7 +71,7 @@ def _preprocess_for_model(volume_3d, target_shape=(32, 128, 128)):
     return vol_resized
 
 
-def explain_integrated_gradients_stream(model, volume_3d, device, target_class=None):
+def explain_input_x_gradient_stream(model, volume_3d, device, target_class=None):
     vol_resized = _preprocess_for_model(volume_3d)
     input_numpy = vol_resized.squeeze(0).cpu().numpy()
 
@@ -80,7 +80,7 @@ def explain_integrated_gradients_stream(model, volume_3d, device, target_class=N
             logits = model(vol_resized.to(device))
             target_class = int(logits.argmax(dim=1).item())
 
-    attributions = explain_prediction_with_integrated_gradients(
+    attributions = explain_prediction_with_input_x_gradient(
         model, input_numpy, target_class, device
     )
     attr_map = attributions[0]  # (32, 128, 128)
@@ -411,7 +411,7 @@ def main():
                         st.write(st.session_state.xai_result[2])
 
                 with xai_col2:
-                    if st.button("Integrated Gradients (slice)"):
+                    if st.button("Input X Gradient (slice)"):
                         st.session_state.xai_method = "ig"
                         st.session_state.xai_result = None
 
@@ -427,11 +427,9 @@ def main():
                             img, pred_dict = explain_lime(model, arr, device)
                             st.session_state.xai_result = ("LIME", img, pred_dict)
                         elif st.session_state.xai_method == "ig":
-                            img = explain_integrated_gradients_stream(
-                                model, arr, device
-                            )
+                            img = explain_input_x_gradient_stream(model, arr, device)
                             st.session_state.xai_result = (
-                                "Integrated Gradients",
+                                "Input X Gradient",
                                 img,
                                 None,
                             )
@@ -453,7 +451,7 @@ def main():
                     img = img * attributions_mask
                     ax.imshow(img, cmap="hot", interpolation="none", alpha=0.1)
                     ax.set_axis_off()
-                    st.pyplot(fig)
+                    st.pyplot(fig, width="content")
                     if pred_dict:
                         st.write(pred_dict)
 
