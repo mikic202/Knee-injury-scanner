@@ -1,0 +1,26 @@
+# Git
+.git
+.gitignore
+.gitmodules
+
+# Python/Environment
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+.env
+venv/
+env/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+
+# Streamlit
+.streamlit/
+checkpoints/ 
+
+# Tests
+tests/
+.pytest_cache/

@@ -8,10 +8,6 @@ import plotly.graph_objects as go
 import sys
 import logging
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
 from src.model_architecture.resnet3d.resnet import get_resnet3d
 from git_submodules.PyAiWrap.pyaiwrap.xai import LIMEExplainer
 from src.explainibility.basic_gradient_based_methods import (
@@ -20,6 +16,11 @@ from src.explainibility.basic_gradient_based_methods import (
 )
 
 from src.web_app.config import AppConfig
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 
 logging.basicConfig(
     level=getattr(logging, AppConfig.LOG_LEVEL, logging.INFO),
