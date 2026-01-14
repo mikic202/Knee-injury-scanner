@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-
+import time
 from src.web_app import main as web_main
 from src.model_architecture.resnet3d.resnet import get_resnet3d
 
@@ -31,17 +31,17 @@ def test_explain_buttons_monkeypatched(monkeypatch):
 
     monkeypatch.setattr(web_main, 'explain_prediction_with_integrated_gradients', fake_ig)
     monkeypatch.setattr(web_main, 'explain_prediction_with_saliency', fake_sal)
-
-    # Use a dummy model that returns a valid classification output shape
-    class DummyModel(torch.nn.Module):
+    
+    class SimpleClassifier(torch.nn.Module):
         def forward(self, x):
             return torch.randn(x.shape[0], 3)
-
-    model = DummyModel()
+            
+    model = SimpleClassifier()
     device = torch.device('cpu')
 
     ig = web_main.explain_integrated_gradients_stream(model, vol, device)
     sal = web_main.explain_saliency_stream(model, vol, device)
+
     assert ig.shape == (32, 32)
     assert sal.shape == (32, 32)
 
@@ -82,3 +82,27 @@ def test_predict_knee_diagnosis_and_get_text():
     assert "Kolano jest zdrowe" in web_main.get_diagnosis_text(0)
     assert "ACL częściowo" in web_main.get_diagnosis_text(1)
     assert "ACL całkowicie" in web_main.get_diagnosis_text(2)
+
+
+def test_inference_performance_benchmark():
+    device = torch.device('cpu')
+    model = get_resnet3d(num_classes=3, in_channels=1).to(device)
+    model.eval()
+    
+    input_tensor = torch.randn(1, 1, 32, 128, 128).to(device)
+    
+    with torch.no_grad():
+        _ = model(input_tensor)
+        
+    n_loops = 5
+    start_time = time.time()
+    with torch.no_grad():
+        for _ in range(n_loops):
+            _ = model(input_tensor)
+    end_time = time.time()
+    
+    avg_time = (end_time - start_time) / n_loops
+    
+    print(f"\n[Performance] Average inference time (ResNet3D, CPU): {avg_time:.4f}s")
+    
+    assert avg_time < 2.0, f"Inferencja modelu jest zbyt wolna: {avg_time:.4f}s > 2.0s"
