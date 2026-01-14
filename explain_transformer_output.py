@@ -177,9 +177,6 @@ def simpleDualGrid(input_volume, explanation, method_name="XAI", save_path=None,
         rgb_slice = np.clip(rgb_slice, 0, 1)  # Ensure values stay in valid range
         grid[y_start:y_end, x_start:x_end, :] = rgb_slice
 
-    # Display grid
-    im = ax.imshow(grid, vmin=0, vmax=1)
-
     # Set title
     title_text = f'MRI Slices with {method_name} Explanations Overlay\n{attribution_type}'
     ax.set_title(title_text, fontsize=16, pad=20, fontweight='bold', color='white')

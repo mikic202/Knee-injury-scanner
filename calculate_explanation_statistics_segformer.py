@@ -65,7 +65,7 @@ def loadSavedData(data_dir: Path):
         try:
             data = torch.load(file_path, map_location='cpu')
             loaded_data.append(data)
-        except Exception as e:
+        except Exception:
             pass
     
     return loaded_data
@@ -419,7 +419,7 @@ def saveTopOverallPoints(overall_points: Dict, output_dir: Path, top_n: int = 50
             f.write(tabulate(table_data, headers=headers, tablefmt="grid"))
             f.write("\n\n" + "="*100 + "\n")
             
-            f.write(f"\nSummary Statistics:\n")
+            f.write("\nSummary Statistics:\n")
             f.write(f"Total unique points: {len(points)}\n")
             
             if points:
@@ -514,7 +514,7 @@ def main():
     print(f"{'='*80}")
     print(f"All results saved in: {output_dir}")
     
-    print(f"\nKey Findings:")
+    print("\nKey Findings:")
     print("-" * 60)
     
     for result in all_results:
