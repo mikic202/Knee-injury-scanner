@@ -7,14 +7,14 @@ requires-python = ">=3.11"
 dependencies = [
     "captum>=0.7.0",
     "monai>=1.5.1",
-    "numpy==2.3.4",
+    "numpy<2.0.0",
     "pandas==2.2.3",
     "pyaiwrap",
     "scikit-learn>=1.7.2",
     "torch>=2.9.0",
     "streamlit", 
     "plotly",
-    "scikit-image",
+    "scikit-image>=0.21.0",
 ]
 
 [dependency-groups]
