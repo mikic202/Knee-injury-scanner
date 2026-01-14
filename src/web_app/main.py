@@ -8,82 +8,95 @@ import plotly.graph_objects as go
 import sys
 
 from src.model_architecture.resnet3d.resnet import get_resnet3d
-from lime import lime_image
-from skimage.segmentation import mark_boundaries
+from git_submodules.PyAiWrap.pyaiwrap.xai import LIMEExplainer
+from src.explainibility.basic_gradient_based_methods import (
+    explain_prediction_with_integrated_gradients,
+    explain_prediction_with_saliency,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+@st.cache_resource
+def get_lime_explainer():
+    return LIMEExplainer(segmentation_mode=False)
 
-def explain_lime(model, volume_3d, device, num_samples=500):
+def explain_lime(model, volume_3d, device, target_class=None):
     """
-    Wyjaśnienie LIME dla środkowego przekroju 3D volumenu.
-    Zwraca obrazek z boundaries i dict z predykcją.
+    Wyjaśnienie LIME dla 3D volumenu z użyciem PyAiWrap.
     """
+    explainer = get_lime_explainer()
     model.eval()
-    d_idx = volume_3d.shape[0] // 2 if volume_3d.ndim == 3 else 0
-    slice_2d = volume_3d[d_idx, :, :] if volume_3d.ndim == 3 else volume_3d
-    # Normalizacja do 0-255
-    slice_min, slice_max = slice_2d.min(), slice_2d.max()
-    if slice_max > slice_min:
-        slice_2d_norm = ((slice_2d - slice_min) / (slice_max - slice_min) * 255).astype(np.uint8)
+    if isinstance(volume_3d, np.ndarray):
+        tensor = torch.tensor(volume_3d).unsqueeze(0).unsqueeze(0).float().to(device)
     else:
-        slice_2d_norm = np.zeros_like(slice_2d, dtype=np.uint8)
-    slice_rgb = np.stack([slice_2d_norm] * 3, axis=-1).astype(np.float32)
-    def predict_fn(images):
-        batch_size = images.shape[0]
-        volumes = []
-        for i in range(batch_size):
-            img_single = images[i, :, :, 0]
-            vol_single = np.tile(img_single[np.newaxis, :, :], (volume_3d.shape[0], 1, 1))
-            vol_single = torch.tensor(vol_single, dtype=torch.float32).unsqueeze(0)
-            volumes.append(vol_single)
-        volumes_batch = torch.cat(volumes, dim=0).to(device)
+        if volume_3d.ndim == 3:
+             tensor = volume_3d.unsqueeze(0).unsqueeze(0).float().to(device)
+        elif volume_3d.ndim == 4:
+             tensor = volume_3d.unsqueeze(0).float().to(device)
+        else:
+             tensor = volume_3d.float().to(device)
+    if target_class is None:
         with torch.no_grad():
-            logits = model(volumes_batch)
-            probs = torch.softmax(logits, dim=1).cpu().numpy()
-        return probs
-    explainer = lime_image.LimeImageExplainer()
-    explanation = explainer.explain_instance(
-        slice_rgb.astype(np.uint8),
-        predict_fn,
-        top_labels=1,
-        num_samples=num_samples,
-        hide_color=0
+            pred = model(tensor)
+            target_class = int(pred.argmax(dim=1).item())
+
+    lime_explanation = explainer.explain(model, tensor, target=target_class)
+    lime_map = lime_explanation.cpu().squeeze(0).squeeze(0).numpy()
+    d_idx = lime_map.shape[0] // 2
+    slice_lime = lime_map[d_idx]
+    slice_lime = (slice_lime - slice_lime.min()) / (slice_lime.max() - slice_lime.min() + 1e-8)
+    return slice_lime, {"target_class": target_class}
+
+def _preprocess_for_model(volume_3d, target_shape=(32, 128, 128)):
+    vol = volume_3d.astype(np.float32)
+    vol = (vol - vol.min()) / (vol.max() - vol.min() + 1e-8)
+    vol_tensor = torch.tensor(vol, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+    vol_resized = torch.nn.functional.interpolate(
+        vol_tensor, size=target_shape, mode='trilinear', align_corners=False
     )
-    top_label = explanation.top_labels[0]
-    temp, mask = explanation.get_image_and_mask(
-        top_label,
-        positive_only=False,
-        num_features=10,
-        hide_rest=False
+    return vol_resized
+
+def explain_integrated_gradients_stream(model, volume_3d, device, target_class=None):
+    vol_resized = _preprocess_for_model(volume_3d)
+    input_numpy = vol_resized.squeeze(0).cpu().numpy() 
+    
+    if target_class is None:
+        with torch.no_grad():
+            logits = model(vol_resized.to(device))
+            target_class = int(logits.argmax(dim=1).item())
+
+    attributions = explain_prediction_with_integrated_gradients(
+        model, input_numpy, target_class, device
     )
-    img_boundary = mark_boundaries(temp / 255.0, mask)
-    preds = predict_fn(slice_rgb[np.newaxis, :, :, :])
-    pred_dict = {
-        "class_0": float(preds[0, 0]),
-        "class_1": float(preds[0, 1]) if preds.shape[1] > 1 else None,
-        "class_2": float(preds[0, 2]) if preds.shape[1] > 2 else None,
-        "predicted_class": int(np.argmax(preds[0])),
-        "top_label": int(top_label)
-    }
-    return (img_boundary, pred_dict)
+    attr_map = attributions[0] # (32, 128, 128)
+    d_idx = attr_map.shape[0] // 2
+    slice_map = attr_map[d_idx]
+    
+    slice_map = np.abs(slice_map)
+    slice_map = (slice_map - slice_map.min()) / (slice_map.max() - slice_map.min() + 1e-8)
+    
+    return slice_map
 
-def explain_guided_backprop(model, volume_3d, device):
-    # Placeholder: tu wstaw kod Guided Backpropagation
-    d_idx = volume_3d.shape[0] // 2 if volume_3d.ndim == 3 else 0
-    slice_2d = volume_3d[d_idx, :, :] if volume_3d.ndim == 3 else volume_3d
-    # Zwróć obrazek z losowym szumem jako placeholder
-    return np.random.rand(*slice_2d.shape)
+def explain_saliency_stream(model, volume_3d, device):
+    vol_resized = _preprocess_for_model(volume_3d)
+    input_numpy = vol_resized.squeeze(0).cpu().numpy()
+    
+    with torch.no_grad():
+        logits = model(vol_resized.to(device))
+        target_class = int(logits.argmax(dim=1).item())
 
-def explain_saliency(model, volume_3d, device):
-    # Placeholder: tu wstaw kod Saliency
-    d_idx = volume_3d.shape[0] // 2 if volume_3d.ndim == 3 else 0
-    slice_2d = volume_3d[d_idx, :, :] if volume_3d.ndim == 3 else volume_3d
-    # Zwróć obrazek z losowym szumem jako placeholder
-    return np.random.rand(*slice_2d.shape)
-
+    attributions = explain_prediction_with_saliency(
+        model, input_numpy, target_class, device
+    )
+    
+    attr_map = attributions[0]
+    d_idx = attr_map.shape[0] // 2
+    slice_map = attr_map[d_idx]
+    slice_map = (slice_map - slice_map.min()) / (slice_map.max() - slice_map.min() + 1e-8)
+    
+    return slice_map
 
 @st.cache_resource
 def load_model(checkpoint_path: str):
@@ -156,7 +169,6 @@ def predict_knee_diagnosis(model, device, volume_3d: np.ndarray, target_shape=(3
     if model is None:
         return None, {}
     
-    # Normalizuj volume do 0-1
     vol = volume_3d.astype(np.float32)
     vol_min, vol_max = vol.min(), vol.max()
     if vol_max > vol_min:
@@ -164,7 +176,6 @@ def predict_knee_diagnosis(model, device, volume_3d: np.ndarray, target_shape=(3
     else:
         vol = np.zeros_like(vol, dtype=np.float32)
     
-    # Przeskaluj do target shape za pomocą torch.nn.functional.interpolate
     vol_tensor = torch.tensor(vol, dtype=torch.float32).unsqueeze(0).unsqueeze(0)  # (1,1,D,H,W)
     vol_resized = torch.nn.functional.interpolate(
         vol_tensor, 
@@ -173,7 +184,6 @@ def predict_knee_diagnosis(model, device, volume_3d: np.ndarray, target_shape=(3
         align_corners=False
     )  # (1,1,32,128,128)
     
-    # Predykcja
     vol_resized = vol_resized.to(device)
     with torch.no_grad():
         logits = model(vol_resized)
@@ -203,21 +213,13 @@ def main():
     st.title("🏥 Knee Injury Scanner — AI Diagnosis")
     st.write("Analiza zdjęć MRI kolana przy użyciu sieci neuronowej ResNet3D")
     
-    # Sidebar
-    st.sidebar.header("⚙️ Konfiguracja")
-    model_path = st.sidebar.text_input(
-        "Ścieżka do checkpointu modelu",
-        value="/home/dominika/Projekty_MGR/Knee-injury-scanner/checkpoints/resnet3d_best_10_01_16:49.pt"
-    )
+    model_path = "/home/dominika/Projekty_MGR/Knee-injury-scanner/checkpoints/resnet3d_best_10_01_16:49.pt"
     target_shape = (32, 128, 128)
-    st.sidebar.info(f"Target shape dla modelu: {target_shape}")
     
-    # Załaduj model
     model, device = load_model(model_path)
     
     st.markdown("---")
     
-    # Upload sekcja
     st.header("📁 Wgraj plik MRI (.pck)")
     uploaded = st.file_uploader("Wgraj plik .pck", type=["pck"])
     
@@ -230,7 +232,6 @@ def main():
             st.error(f"✗ Błąd przy wczytywaniu pickle: {e}")
             return
 
-        # Wyciągnij array
         arr = None
         if isinstance(data, np.ndarray):
             arr = data
@@ -250,7 +251,6 @@ def main():
             st.write(f"📊 Kształt danych: {arr.shape}")
             st.write(f"📈 Zakres intensywności: [{arr.min():.2f}, {arr.max():.2f}]")
             
-            # Wyświetl slice
             col1, col2 = st.columns(2)
             
             with col1:
@@ -261,7 +261,6 @@ def main():
                     mid = arr.shape[0] // 2
                     st.image(_normalize_for_display(arr[mid]), caption=f"Środkowy przekrój (slice {mid})", use_column_width=True)
             
-            # 3D Visualization
             with col2:
                 st.subheader("3D Visualization")
                 if arr.ndim == 3:
@@ -280,7 +279,6 @@ def main():
             
             st.markdown("---")
             
-            # Diagnosis section
             st.header("🔬 Diagnoza AI")
 
             # --- AI session state ---
@@ -295,7 +293,6 @@ def main():
                         )
                     st.session_state.ai_result = (predicted_class, probs)
 
-            # Wyświetl wynik AI jeśli jest
             if st.session_state.ai_result:
                 predicted_class, probs = st.session_state.ai_result
                 st.success("✓ Analiza zakończona")
@@ -347,9 +344,18 @@ def main():
                         st.session_state.xai_method = "lime"
                         st.session_state.xai_result = None
 
+                    if st.session_state.xai_method == "lime" and st.session_state.xai_result is None:
+                        with st.spinner("Obliczanie LIME..."):
+                            lime_img, pred_dict = explain_lime(model, arr, device)
+                            st.session_state.xai_result = ("LIME", lime_img, pred_dict)
+
+                    if st.session_state.xai_result and st.session_state.xai_result[0] == "LIME":
+                        st.image(st.session_state.xai_result[1], caption="LIME (middle slice)", use_column_width=True)
+                        st.write(st.session_state.xai_result[2])
+
                 with xai_col2:
-                    if st.button("Guided Backprop (slice)"):
-                        st.session_state.xai_method = "gbp"
+                    if st.button("Integrated Gradients (slice)"):
+                        st.session_state.xai_method = "ig"
                         st.session_state.xai_result = None
 
                 with xai_col3:
@@ -357,28 +363,24 @@ def main():
                         st.session_state.xai_method = "saliency"
                         st.session_state.xai_result = None
 
-                # Wykonaj XAI tylko jeśli trzeba
                 if st.session_state.xai_method and st.session_state.xai_result is None:
                     with st.spinner("Obliczanie wyjaśnienia..."):
                         if st.session_state.xai_method == "lime":
                             img, pred_dict = explain_lime(model, arr, device)
                             st.session_state.xai_result = ("LIME", img, pred_dict)
-                        elif st.session_state.xai_method == "gbp":
-                            img = explain_guided_backprop(model, arr, device)
-                            st.session_state.xai_result = ("Guided Backprop", img, None)
+                        elif st.session_state.xai_method == "ig":
+                            img = explain_integrated_gradients_stream(model, arr, device)
+                            st.session_state.xai_result = ("Integrated Gradients", img, None)
                         elif st.session_state.xai_method == "saliency":
-                            img = explain_saliency(model, arr, device)
+                            img = explain_saliency_stream(model, arr, device)
                             st.session_state.xai_result = ("Saliency", img, None)
 
-                # Wyświetl wynik XAI jeśli jest
                 if st.session_state.xai_result:
                     method, img, pred_dict = st.session_state.xai_result
                     st.subheader(f"Wynik XAI: {method}")
                     st.image(img, caption=f"{method} (middle slice)", use_column_width=True)
                     if pred_dict:
                         st.write(pred_dict)
-            else:
-                st.error("❌ Model nie został załadowany — sprawdź ścieżkę checkpointu")
 
 
 if __name__ == "__main__":
