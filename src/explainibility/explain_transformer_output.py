@@ -73,194 +73,253 @@ def createFeatureMask(input_tensor: torch.Tensor, block_size: int = 16):
     return feature_mask
 
 
-def simpleDualGrid(input_volume, explanation, method_name="XAI", save_path=None, dpi=150, alpha=0.4):
-    """
-    Combined visualization of input MRI with overlaid explanations.
+def simpleDualGrid(input_volume, explanation, method_name="XAI", save_path=None, dpi=150, alpha=0.7):
 
-    Args:
-        input_volume: Input tensor [B, C, D, H, W] or [B, D, H, W]
-        explanation: Explanation tensor [B, C, D, H, W] or [B, D, H, W]
-        method_name: Name of XAI method for title
-        save_path: Optional path to save figure
-        dpi: Resolution for saved image
-        alpha: Transparency for overlay (0-1)
-    """
     if input_volume.dim() == 5:
         input_np = input_volume[0, 0].cpu().numpy()
         exp_np = explanation[0, 0].cpu().numpy()
     else:
         input_np = input_volume[0].cpu().numpy()
         exp_np = explanation[0].cpu().numpy()
-
+    
     rows, cols = 4, 8
     slices_per_image = rows * cols
+    
+    # 1. Grayscale to [0, 1]
+    p_low, p_high = np.percentile(input_np, [5, 95])  # Use wider percentiles
+    if p_high > p_low:
+        mri_norm = np.clip((input_np - p_low) / (p_high - p_low), 0, 1)
+    else:
+        mri_norm = input_np / (input_np.max() + 1e-8)
+    
+    # Apply gamma to make knees more visible
+    mri_norm = np.power(mri_norm, 0.6)
 
-    # Create figure
-    fig = plt.figure(figsize=(24, 12))
-    ax = plt.gca()
-
-    # For saliency (only positive values), use single-sided colormap
     if np.min(exp_np) >= 0:
-        # ENHANCED: Use percentile normalization for better visibility of low values
+        # SALIENCY - only positive (red)
         exp_max = np.percentile(exp_np, 99) if np.percentile(exp_np, 99) > 0 else exp_np.max()
-        exp_normalized = exp_np / (exp_max + 1e-8)
-        # ENHANCED: Apply gamma correction to boost lower values
-        exp_normalized = np.power(exp_normalized, 0.5)
-
-        colors = ['black', 'red']  # Black to red for positive-only
-        cmap = mcolors.LinearSegmentedColormap.from_list('positive_attribution', colors)
+        if exp_max > 0:
+            exp_normalized = exp_np / exp_max
+            # Boost visibility
+            exp_normalized = np.power(exp_normalized, 0.5)
+        else:
+            exp_normalized = exp_np
+        
+        # Colormap: black -> red
+        colors = ['black', 'red']
+        cmap = mcolors.LinearSegmentedColormap.from_list('positive_only', colors)
         norm = mcolors.Normalize(vmin=0, vmax=1)
         attribution_type = "(Red=Positive Attribution)"
+        
     else:
-        # For LIME (positive and negative), use dual-sided colormap
-        # ENHANCED: Use 99th percentile for normalization to avoid outlier dominance
-        exp_abs_max = np.percentile(np.abs(exp_np), 99)
-        exp_normalized = np.clip(exp_np / (exp_abs_max + 1e-8), -1, 1)
-
-        colors = ['blue', 'white', 'red']
-        cmap = mcolors.LinearSegmentedColormap.from_list('attribution', colors)
+        # LIME - positive (red) and negative (blue)
+        pos_values = np.maximum(exp_np, 0)
+        neg_values = np.maximum(-exp_np, 0)
+        
+        # Scale independently
+        pos_max = np.percentile(pos_values, 95) if np.percentile(pos_values, 95) > 0 else pos_values.max()
+        neg_max = np.percentile(neg_values, 95) if np.percentile(neg_values, 95) > 0 else neg_values.max()
+        
+        if pos_max > 0:
+            pos_scaled = pos_values / pos_max
+            pos_scaled = np.power(pos_scaled, 0.6)
+        else:
+            pos_scaled = pos_values
+            
+        if neg_max > 0:
+            neg_scaled = neg_values / neg_max
+            neg_scaled = np.power(neg_scaled, 0.6)
+        else:
+            neg_scaled = neg_values
+        
+        # Combine: positive stays positive, negative stays negative
+        exp_normalized = pos_scaled - neg_scaled
+        
+        # Colormap: blue -> black -> red (exactly as requested)
+        colors = ['blue', 'black', 'red']
+        cmap = mcolors.LinearSegmentedColormap.from_list('bipolar_cmap', colors)
         norm = mcolors.Normalize(vmin=-1, vmax=1)
         attribution_type = "(Blue=Negative, Red=Positive Attribution)"
-
+    
     # Get slice dimensions
     slice_height, slice_width = input_np.shape[1], input_np.shape[2]
     grid_height = slice_height * rows
     grid_width = slice_width * cols
     grid = np.zeros((grid_height, grid_width, 3))
-
+    
     # Fill grid with slices
     for i in range(min(slices_per_image, input_np.shape[0])):
         row = i // cols
         col = i % cols
-
+        
         y_start = row * slice_height
         y_end = (row + 1) * slice_height
         x_start = col * slice_width
         x_end = (col + 1) * slice_width
-
-        input_slice = input_np[i]
+        
+        mri_slice = mri_norm[i]
         exp_slice = exp_normalized[i]
 
-        # Normalize input
-        input_min, input_max = input_slice.min(), input_slice.max()
-        if input_max > input_min:
-            input_normalized = (input_slice - input_min) / (input_max - input_min)
-        else:
-            input_normalized = input_slice
-
-        # Create RGB representation
         if np.min(exp_np) >= 0:
-            # Saliency: red channel for attribution, green for background
-            # ENHANCED: Boost red channel intensity
-            red = exp_slice * 2.0  # Increased from 1.0 to 2.0
-            green = input_normalized * 0.7  # Reduced to make red stand out more
-            blue = np.zeros_like(input_normalized)
-        else:
-            # LIME: red for positive, blue for negative, green for background
-            # ENHANCED: Boost color intensity
-            red = np.maximum(exp_slice, 0) * 1.5  # Increased from 1.0 to 1.5
-            blue = np.maximum(-exp_slice, 0) * 1.5  # Increased from 1.0 to 1.5
-            green = input_normalized * 0.8  # Slightly reduced
+            # SALIENCY: Only red positive attributions
+            
+            # Black background
+            red_channel = np.zeros_like(mri_slice)
+            green_channel = np.zeros_like(mri_slice)
+            blue_channel = np.zeros_like(mri_slice)
+            
+            # Gray knees (MRI) - all channels equal
+            gray_intensity = mri_slice * 0.6  # Control gray darkness
+            red_channel += gray_intensity
+            green_channel += gray_intensity
+            blue_channel += gray_intensity
+            
+            # Red positive attributions
+            # Red channel gets attribution + MRI
+            red_attribution = exp_slice * 1.2  # Boost red attribution
+            red_channel += red_attribution
 
-        rgb_slice = np.stack([red, green, blue], axis=-1)
-        # ENHANCED: Use adaptive alpha - stronger attributions get higher alpha
-        if np.min(exp_np) >= 0:
-            # For saliency, use intensity-based alpha
-            attr_strength = exp_slice
-            adaptive_alpha = alpha * (0.3 + 0.7 * attr_strength)
+            red_channel = np.clip(red_channel, 0, 1)
+            green_channel = np.clip(green_channel, 0, 1)
+            blue_channel = np.clip(blue_channel, 0, 1)
+            
         else:
-            # For LIME, use absolute value for alpha
-            attr_strength = np.abs(exp_slice)
-            adaptive_alpha = alpha * (0.3 + 0.7 * attr_strength)
-
-        rgb_slice = input_normalized[:, :, None] * (1 - adaptive_alpha[:, :, None]) + rgb_slice * adaptive_alpha[:, :, None]
-        rgb_slice = np.clip(rgb_slice, 0, 1)  # Ensure values stay in valid range
+            # LIME: Blue negative, Red positive
+            
+            # Black background
+            red_channel = np.zeros_like(mri_slice)
+            green_channel = np.zeros_like(mri_slice)
+            blue_channel = np.zeros_like(mri_slice)
+            
+            # Gray knees (MRI)
+            gray_intensity = mri_slice * 0.5  # Slightly darker to make colors pop
+            red_channel += gray_intensity
+            green_channel += gray_intensity
+            blue_channel += gray_intensity
+            
+            # Extract positive (red) and negative (blue) components
+            pos_mask = exp_slice > 0
+            neg_mask = exp_slice < 0
+            
+            # Red positive attributions
+            if np.any(pos_mask):
+                pos_strength = exp_slice[pos_mask]
+                # Scale and boost
+                pos_scaled = pos_strength * 1.5
+                red_channel[pos_mask] += pos_scaled
+                # Keep some gray in positive areas
+                green_channel[pos_mask] += gray_intensity[pos_mask] * 0.3
+                blue_channel[pos_mask] += gray_intensity[pos_mask] * 0.3
+            
+            #  Blue negative attributions  
+            if np.any(neg_mask):
+                neg_strength = -exp_slice[neg_mask]  # Convert to positive
+                # Scale and boost
+                neg_scaled = neg_strength * 1.5
+                blue_channel[neg_mask] += neg_scaled
+                # Keep some gray in negative areas
+                red_channel[neg_mask] += gray_intensity[neg_mask] * 0.3
+                green_channel[neg_mask] += gray_intensity[neg_mask] * 0.3
+            
+            # Clip to valid range
+            red_channel = np.clip(red_channel, 0, 1)
+            green_channel = np.clip(green_channel, 0, 1)
+            blue_channel = np.clip(blue_channel, 0, 1)
+        
+        # Combine channels
+        rgb_slice = np.stack([red_channel, green_channel, blue_channel], axis=-1)
         grid[y_start:y_end, x_start:x_end, :] = rgb_slice
 
-    # Set title
-    title_text = f'MRI Slices with {method_name} Explanations Overlay\n{attribution_type}'
+    fig = plt.figure(figsize=(24, 12))
+    ax = plt.gca()
+    
+    # Display the grid
+    ax.imshow(grid)
+
+    title_text = f'MRI Slices with {method_name} Explanations\n{attribution_type}'
     ax.set_title(title_text, fontsize=16, pad=20, fontweight='bold', color='white')
     title = ax.title
-    title.set_bbox(dict(boxstyle='round,pad=0.3', facecolor='black', alpha=0.7, edgecolor='white'))
-
+    title.set_bbox(dict(boxstyle='round,pad=0.3', facecolor='black', alpha=0.8, edgecolor='white'))
+    
     ax.axis('off')
-
-    # Add slice numbers
+    
+    # Slice numbers
     for i in range(min(slices_per_image, input_np.shape[0])):
         row = i // cols
         col = i % cols
         text_x = col * slice_width + 5
         text_y = row * slice_height + 15
-
+        
         ax.text(text_x, text_y, f'S{i+1:02d}', 
                 fontsize=9, color='white', fontweight='bold',
                 bbox=dict(boxstyle='round,pad=0.3', facecolor='black', alpha=0.8, edgecolor='white'))
-
-    # Create legend
+    
+    # Legend
     if np.min(exp_np) >= 0:
         legend_elements = [
-            Patch(facecolor='red', alpha=0.8, edgecolor='white', linewidth=1, label='Positive Attribution'),
-            Patch(facecolor='white', alpha=0.8, edgecolor='black', linewidth=1, label='Original MRI'),
+            Patch(facecolor='red', alpha=0.9, edgecolor='white', linewidth=2, label='Positive Attribution'),
+            Patch(facecolor='gray', alpha=0.7, edgecolor='white', linewidth=1, label='Knee MRI (Gray)'),
+            Patch(facecolor='black', alpha=1.0, edgecolor='white', linewidth=1, label='Background (Black)'),
         ]
     else:
         legend_elements = [
-            Patch(facecolor='red', alpha=0.8, edgecolor='white', linewidth=1, label='Positive Attribution'),
-            Patch(facecolor='blue', alpha=0.8, edgecolor='white', linewidth=1, label='Negative Attribution'),
-            Patch(facecolor='white', alpha=0.8, edgecolor='black', linewidth=1, label='Original MRI'),
+            Patch(facecolor='red', alpha=0.9, edgecolor='white', linewidth=2, label='Positive Attribution'),
+            Patch(facecolor='blue', alpha=0.9, edgecolor='white', linewidth=2, label='Negative Attribution'),
+            Patch(facecolor='gray', alpha=0.7, edgecolor='white', linewidth=1, label='Knee MRI (Gray)'),
+            Patch(facecolor='black', alpha=1.0, edgecolor='white', linewidth=1, label='Background (Black)'),
         ]
-
+    
     legend = ax.legend(handles=legend_elements,
                        loc='upper right',
                        bbox_to_anchor=(0.98, 0.98),
-                       fontsize=11,
+                       fontsize=10,
                        framealpha=0.95,
                        frameon=True,
                        labelcolor='white')
     legend.get_frame().set_facecolor('black')
     legend.get_frame().set_edgecolor('white')
     legend.get_frame().set_linewidth(2)
-
-    # Add colorbar
+    
+    # Colorbar
     fig.subplots_adjust(bottom=0.15)
     cax = fig.add_axes([0.25, 0.05, 0.5, 0.02])
     cax.set_facecolor('black')
-
+    
     cbar = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap),
                         cax=cax, orientation='horizontal')
-
+    
     if np.min(exp_np) >= 0:
-        cbar_label = f'{method_name} Attribution Intensity'
+        cbar_label = f'{method_name} Attribution Intensity (Red)'
     else:
         cbar_label = 'Attribution Intensity (Blue=Negative, Red=Positive)'
-
+    
     cbar.set_label(cbar_label, fontsize=12, labelpad=10, color='white')
     cbar.ax.tick_params(labelsize=10, colors='white')
     cax.xaxis.label.set_color('white')
     cax.tick_params(axis='x', colors='white')
-
-    # Add grid lines
+    
+    # Grid lines
     for i in range(1, rows):
-        ax.axhline(y=i * slice_height, color='white', linewidth=0.7, alpha=0.4, linestyle='--')
+        ax.axhline(y=i * slice_height, color='white', linewidth=0.7, alpha=0.3, linestyle='--')
     for i in range(1, cols):
-        ax.axvline(x=i * slice_width, color='white', linewidth=0.7, alpha=0.4, linestyle='--')
-
-    # Set dark background
+        ax.axvline(x=i * slice_width, color='white', linewidth=0.7, alpha=0.3, linestyle='--')
+    
+    # Dark background
     fig.patch.set_facecolor('black')
     ax.set_facecolor('black')
 
-    # Save figure
     if save_path is not None:
         save_path = Path(save_path)
         save_path.parent.mkdir(parents=True, exist_ok=True)
-
+        
         if save_path.exists():
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             save_path = save_path.parent / f"{save_path.stem}_{timestamp}{save_path.suffix}"
-
+        
         plt.savefig(save_path, dpi=dpi, bbox_inches='tight', 
                     facecolor='black', edgecolor='none',
                     transparent=False)
-
+    
     return fig, save_path if save_path else None
 
 
