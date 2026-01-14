@@ -1,5 +1,4 @@
 import torch
-import numpy as np
 
 from src.model_architecture.resnet3d.resnet import get_resnet3d, FocalLoss
 from src.model_architecture.cnn_clasifier.cnn_clasifier import CnnKneeClassifier

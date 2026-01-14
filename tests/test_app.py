@@ -1,7 +1,5 @@
 import numpy as np
 import torch
-import pickle
-import io
 
 from src.web_app import main as web_main
 from src.model_architecture.resnet3d.resnet import get_resnet3d
