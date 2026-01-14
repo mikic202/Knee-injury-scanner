@@ -15,7 +15,7 @@ def parseArguments():
     parser.add_argument(
         "--data_dirs",
         nargs="+",
-        default=["./LIME/", "./Saliency/", "./GradCAM/"],
+        default=["../../LIME/", "../../Saliency/", "../../GradCAM/"],
     )
     parser.add_argument(
         "--method_names",
@@ -25,7 +25,7 @@ def parseArguments():
     parser.add_argument(
         "--output_dir",
         type=str,
-        default="./analysis/",
+        default="../../analysis/",
     )
     parser.add_argument(
         "--top_points",
@@ -46,7 +46,7 @@ def parseArguments():
     parser.add_argument(
         "--table_format",
         type=str,
-        default="grid",
+        default="fancy_grid",
         choices=["grid", "simple", "fancy_grid", "github", "pipe", "orgtbl", "jira", "presto", "pretty", "psql", "rst", "mediawiki", "moinmoin", "youtrack", "html", "latex", "latex_raw", "latex_booktabs", "textile"],
     )
     return parser.parse_args()

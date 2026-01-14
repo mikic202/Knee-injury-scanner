@@ -304,7 +304,7 @@ def main():
     device = prepareDevice()
     data_loader, dataset_size = createDataLoader(config)
     generator = createGenerator(config=config, device=device)
-    generator.load_state_dict(torch.load("./weights/segmentator_segformer_hyperparams_SegFormer3D.pth", map_location=device))
+    generator.load_state_dict(torch.load("../../weights/segmentator_segformer_hyperparams_SegFormer3D.pth", map_location=device))
     generator = generator.eval()
     lime_explainer = LIMEExplainer(
         n_samples=100,           # Number of LIME samples
@@ -339,9 +339,9 @@ def main():
     print(f"  Range: [{explanation.min():.6f}, {explanation.max():.6f}]")
     print(f"  Mean: {explanation.mean():.6f}")
     print(f"  Std: {explanation.std():.6f}")
-    simpleDualGrid(voxels, explanation, "LIME", save_path=f"./diagrams/SegFormer3D_kneemridataset_lime_explanation_{args.sample_idx}.png", dpi=250, alpha=1.0)
+    simpleDualGrid(voxels, explanation, "LIME", save_path=f"../../diagrams/SegFormer3D_kneemridataset_lime_explanation_{args.sample_idx}.png", dpi=250, alpha=1.0)
 
-    saveRawData(voxels, explanation, args.sample_idx, output_dir="./LIME/")
+    saveRawData(voxels, explanation, args.sample_idx, output_dir="../../LIME/")
     explainer = SaliencyExplainer(absolute=True)
 
     explanation = explainer.explain(
@@ -355,9 +355,9 @@ def main():
     print(f"  Range: [{explanation.min():.6f}, {explanation.max():.6f}]")
     print(f"  Mean: {explanation.mean():.6f}")
     print(f"  Std: {explanation.std():.6f}")
-    simpleDualGrid(voxels, explanation, "Saliency", save_path=f"./diagrams/SegFormer3D_kneemridataset_saliency_explanation_{args.sample_idx}.png", dpi=250, alpha=1.0)
+    simpleDualGrid(voxels, explanation, "Saliency", save_path=f"../../diagrams/SegFormer3D_kneemridataset_saliency_explanation_{args.sample_idx}.png", dpi=250, alpha=1.0)
 
-    saveRawData(voxels, explanation, args.sample_idx, output_dir="./Saliency/")
+    saveRawData(voxels, explanation, args.sample_idx, output_dir="../../Saliency/")
     explainer = GradCAMExplainer()
 
     explanation = explainer.explain(
@@ -371,9 +371,9 @@ def main():
     print(f"  Range: [{explanation.min():.6f}, {explanation.max():.6f}]")
     print(f"  Mean: {explanation.mean():.6f}")
     print(f"  Std: {explanation.std():.6f}")
-    simpleDualGrid(voxels, explanation, "GradCAM", save_path=f"./diagrams/SegFormer3D_kneemridataset_gradcam_explanation_{args.sample_idx}.png", dpi=250, alpha=1.0)
+    simpleDualGrid(voxels, explanation, "GradCAM", save_path=f"../../diagrams/SegFormer3D_kneemridataset_gradcam_explanation_{args.sample_idx}.png", dpi=250, alpha=1.0)
 
-    saveRawData(voxels, explanation, args.sample_idx, output_dir="./GradCAM/")
+    saveRawData(voxels, explanation, args.sample_idx, output_dir="../../GradCAM/")
 
 
 if __name__ == "__main__":
