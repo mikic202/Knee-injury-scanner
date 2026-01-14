@@ -14,8 +14,10 @@ def test_normalize_and_plot_helpers():
     vol = np.random.rand(16, 32, 32).astype(np.float32)
     model = get_resnet3d(num_classes=3, in_channels=1)
     model.eval()
-    device = torch.device('cpu')
-    pred_class, probs = web_main.predict_knee_diagnosis(model, device, vol, target_shape=(8, 16, 16))
+    device = torch.device("cpu")
+    pred_class, probs = web_main.predict_knee_diagnosis(
+        model, device, vol, target_shape=(8, 16, 16)
+    )
     assert isinstance(pred_class, int)
     assert abs(sum(probs.values()) - 1.0) < 1e-4
 
@@ -29,17 +31,17 @@ def test_explain_buttons_monkeypatched(monkeypatch):
     def fake_sal(model, example, target_class, device=None):
         return np.full((1, 16, 32, 32), 2.0, dtype=np.float32)
 
-    monkeypatch.setattr(web_main, 'explain_prediction_with_integrated_gradients', fake_ig)
-    monkeypatch.setattr(web_main, 'explain_prediction_with_saliency', fake_sal)
-    
+    monkeypatch.setattr(web_main, "explain_prediction_with_input_x_gradient", fake_ig)
+    monkeypatch.setattr(web_main, "explain_prediction_with_saliency", fake_sal)
+
     class SimpleClassifier(torch.nn.Module):
         def forward(self, x):
             return torch.randn(x.shape[0], 3)
-            
-    model = SimpleClassifier()
-    device = torch.device('cpu')
 
-    ig = web_main.explain_integrated_gradients_stream(model, vol, device)
+    model = SimpleClassifier()
+    device = torch.device("cpu")
+
+    ig = web_main.explain_input_x_gradient_stream(model, vol, device)
     sal = web_main.explain_saliency_stream(model, vol, device)
 
     assert ig.shape == (32, 32)
@@ -48,12 +50,12 @@ def test_explain_buttons_monkeypatched(monkeypatch):
 
 def test_load_model_fallback_on_bad_path(monkeypatch):
     def fake_load(path, map_location=None):
-        raise RuntimeError('bad')
+        raise RuntimeError("bad")
 
-    monkeypatch.setattr(torch, 'load', fake_load)
-    model, device = web_main.load_model('/non/existent/path.pt')
+    monkeypatch.setattr(torch, "load", fake_load)
+    model, device = web_main.load_model("/non/existent/path.pt")
     assert model is None and device is None
-    
+
 
 def test_normalize_for_display_constant_and_range():
     a = np.zeros((8, 8), dtype=np.float32)
@@ -69,13 +71,22 @@ def test_normalize_for_display_constant_and_range():
 
 def test_predict_knee_diagnosis_and_get_text():
     vol = np.random.rand(16, 32, 32).astype(np.float32)
-    device = torch.device('cpu')
+    device = torch.device("cpu")
     model = get_resnet3d(num_classes=3, in_channels=1)
     model.eval()
 
-    predicted_class, probs = web_main.predict_knee_diagnosis(model, device, vol, target_shape=(8, 16, 16))
+    predicted_class, probs = web_main.predict_knee_diagnosis(
+        model, device, vol, target_shape=(8, 16, 16)
+    )
     assert isinstance(predicted_class, int)
-    assert all(k in probs for k in ["Zdrowe kolano (0)", "ACL częściowo zerwane (1)", "ACL całkowicie zerwane (2)"])
+    assert all(
+        k in probs
+        for k in [
+            "Zdrowe kolano (0)",
+            "ACL częściowo zerwane (1)",
+            "ACL całkowicie zerwane (2)",
+        ]
+    )
     total = sum(probs.values())
     assert abs(total - 1.0) < 1e-4
 
@@ -85,24 +96,24 @@ def test_predict_knee_diagnosis_and_get_text():
 
 
 def test_inference_performance_benchmark():
-    device = torch.device('cpu')
+    device = torch.device("cpu")
     model = get_resnet3d(num_classes=3, in_channels=1).to(device)
     model.eval()
-    
+
     input_tensor = torch.randn(1, 1, 32, 128, 128).to(device)
-    
+
     with torch.no_grad():
         _ = model(input_tensor)
-        
+
     n_loops = 5
     start_time = time.time()
     with torch.no_grad():
         for _ in range(n_loops):
             _ = model(input_tensor)
     end_time = time.time()
-    
+
     avg_time = (end_time - start_time) / n_loops
-    
+
     print(f"\n[Performance] Average inference time (ResNet3D, CPU): {avg_time:.4f}s")
-    
+
     assert avg_time < 2.0, f"Inferencja modelu jest zbyt wolna: {avg_time:.4f}s > 2.0s"
