@@ -632,14 +632,14 @@ def main():
             print(f"  Absolute mean: {agg_stats['abs_mean']['formatted']}")
             print(f"  Min/Max: {agg_stats['min']['formatted']} / {agg_stats['max']['formatted']}")
     
-    print(f"\nSummary:")
+    print("\nSummary:")
     print(f"- Total methods analyzed: {len([r for r in all_results if r['num_analyzed'] > 0])}")
     print(f"- Total samples processed: {sum(r['num_analyzed'] for r in all_results)}")
     print(f"- Results directory: {output_dir}")
-    print(f"  ├── comparison_table.[csv/txt/xlsx]")
-    print(f"  ├── detailed_statistics/")
-    print(f"  ├── top_points/")
-    print(f"  └── overall_points/")
+    print("  ├── comparison_table.[csv/txt/xlsx]")
+    print("  ├── detailed_statistics/")
+    print("  ├── top_points/")
+    print("  └── overall_points/")
 
 
 if __name__ == "__main__":
