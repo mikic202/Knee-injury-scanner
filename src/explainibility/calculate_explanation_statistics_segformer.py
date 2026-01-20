@@ -7,7 +7,8 @@ import json
 from scipy import stats
 from tabulate import tabulate
 from collections import Counter
-from typing import List, Dict
+from typing import List, Dict, Generator
+import gc
 
 
 def parseArguments():
@@ -49,10 +50,17 @@ def parseArguments():
         default="fancy_grid",
         choices=["grid", "simple", "fancy_grid", "github", "pipe", "orgtbl", "jira", "presto", "pretty", "psql", "rst", "mediawiki", "moinmoin", "youtrack", "html", "latex", "latex_raw", "latex_booktabs", "textile"],
     )
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=10,
+        help="Number of files to load and process in memory at once"
+    )
     return parser.parse_args()
 
 
-def loadSavedData(data_dir: Path):
+def getDataFiles(data_dir: Path) -> List[Path]:
+    """Get list of data files without loading them."""
     if not data_dir.exists():
         raise FileNotFoundError(f"Directory {data_dir} does not exist")
     
@@ -60,15 +68,29 @@ def loadSavedData(data_dir: Path):
     if not data_files:
         raise FileNotFoundError(f"No .pth files found in {data_dir}")
     
-    loaded_data = []
-    for file_path in sorted(data_files):
-        try:
-            data = torch.load(file_path, map_location='cpu')
-            loaded_data.append(data)
-        except Exception:
-            pass
+    return sorted(data_files)
+
+
+def loadDataInBatches(file_paths: List[Path], batch_size: int = 10) -> Generator[List[Dict], None, None]:
+    """Load data files in batches to manage memory."""
+    total_files = len(file_paths)
     
-    return loaded_data
+    for i in range(0, total_files, batch_size):
+        batch_files = file_paths[i:i + batch_size]
+        batch_data = []
+        
+        for file_path in batch_files:
+            try:
+                data = torch.load(file_path, map_location='cpu')
+                batch_data.append(data)
+            except Exception as e:
+                print(f"Warning: Could not load {file_path}: {e}")
+                continue
+        
+        yield batch_data
+        
+        del batch_data
+        gc.collect()
 
 
 def calculateStatistics(explanation_tensor: torch.Tensor):
@@ -140,63 +162,119 @@ def findTopPoints(explanation_tensor: torch.Tensor,
     return points
 
 
-def analyzeMethod(data_dir: Path, method_name: str, top_n: int = 100):
-    all_data = loadSavedData(data_dir)
+def processBatchStatistics(batch_data: List[Dict]) -> List[Dict]:
+    """Process a batch of data for statistics."""
+    batch_stats = []
     
-    if not all_data:
-        raise ValueError(f"No valid data found for {method_name}")
-    
-    all_stats = []
-    all_top_points = []
-    
-    for i, sample_data in enumerate(all_data):
+    for i, sample_data in enumerate(batch_data):
         explanation_tensor = sample_data['explanation']
-        input_tensor = sample_data.get('input', None)
         sample_idx = sample_data.get('sample_idx', i)
         
         stats_dict = calculateStatistics(explanation_tensor)
         stats_dict['sample_idx'] = sample_idx
-        all_stats.append(stats_dict)
+        batch_stats.append(stats_dict)
+    
+    return batch_stats
+
+
+def processBatchTopPoints(batch_data: List[Dict], top_n: int) -> List[Dict]:
+    """Process a batch of data for top points."""
+    batch_top_points = []
+    
+    for i, sample_data in enumerate(batch_data):
+        explanation_tensor = sample_data['explanation']
+        input_tensor = sample_data.get('input', None)
+        sample_idx = sample_data.get('sample_idx', i)
         
         try:
             top_points = findTopPoints(explanation_tensor, input_tensor, top_n)
-            all_top_points.append({
+            batch_top_points.append({
                 'sample_idx': sample_idx,
                 'top_points': top_points
             })
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Warning: Could not extract top points for sample {sample_idx}: {e}")
     
-    if all_stats:
-        stats_df = pd.DataFrame(all_stats)
+    return batch_top_points
+
+
+def aggregateStatistics(all_stats: List[Dict]) -> Dict:
+    """Aggregate statistics from all samples."""
+    if not all_stats:
+        return {}
+    
+    stats_df = pd.DataFrame(all_stats)
+    
+    aggregated_stats = {}
+    for col in stats_df.columns:
+        if col not in ['sample_idx']:
+            mean_val = stats_df[col].mean()
+            
+            if len(stats_df) > 1:
+                std_val = stats_df[col].std()
+                formatted_val = f"{mean_val:.6f} ± {std_val:.6f}"
+            else:
+                formatted_val = f"{mean_val:.6f}"
+            
+            aggregated_stats[col] = {
+                'mean': mean_val,
+                'std': std_val if len(stats_df) > 1 else None,
+                'formatted': formatted_val,
+                'has_std': len(stats_df) > 1
+            }
+    
+    return aggregated_stats
+
+
+def analyzeMethodStreaming(data_dir: Path, method_name: str, top_n: int = 100, 
+                          batch_size: int = 10):
+    """Streaming version of analyzeMethod that processes files in batches."""
+    try:
+        data_files = getDataFiles(data_dir)
+    except FileNotFoundError as e:
+        print(f"Error for {method_name}: {e}")
+        return {
+            'method_name': method_name,
+            'data_dir': str(data_dir),
+            'num_samples': 0,
+            'num_analyzed': 0,
+            'aggregated_statistics': {},
+            'sample_statistics': [],
+            'top_points': []
+        }
+    
+    print(f"  Processing {len(data_files)} files for {method_name}...")
+    
+    all_stats = []
+    all_top_points = []
+    processed_files = 0
+    
+    for batch_data in loadDataInBatches(data_files, batch_size):
+        batch_stats = processBatchStatistics(batch_data)
+        all_stats.extend(batch_stats)
         
-        aggregated_stats = {}
-        for col in stats_df.columns:
-            if col not in ['sample_idx']:
-                mean_val = stats_df[col].mean()
-                
-                if len(stats_df) > 1:
-                    std_val = stats_df[col].std()
-                    formatted_val = f"{mean_val:.6f} ± {std_val:.6f}"
-                else:
-                    formatted_val = f"{mean_val:.6f}"
-                
-                aggregated_stats[col] = {
-                    'mean': mean_val,
-                    'std': std_val if len(stats_df) > 1 else None,
-                    'formatted': formatted_val,
-                    'has_std': len(stats_df) > 1
-                }
+        batch_top_points = processBatchTopPoints(batch_data, top_n)
+        all_top_points.extend(batch_top_points)
+        
+        processed_files += len(batch_data)
+        
+        if processed_files % 100 == 0:
+            print(f"    Processed {processed_files}/{len(data_files)} files...")
+
+        del batch_data
+        gc.collect()
+
+    aggregated_stats = aggregateStatistics(all_stats)
     
     results = {
         'method_name': method_name,
         'data_dir': str(data_dir),
-        'num_samples': len(all_data),
-        'num_analyzed': len(all_stats),
-        'aggregated_statistics': aggregated_stats if all_stats else {},
+        'num_samples': len(data_files),
+        'num_analyzed': processed_files,
+        'aggregated_statistics': aggregated_stats,
         'sample_statistics': all_stats,
         'top_points': all_top_points,
-        'all_data': all_data
+        'data_files': data_files
     }
     
     return results
@@ -310,9 +388,11 @@ def findTopOverallPointsByFrequency(method_results: List[Dict], top_overall_n: i
             method_overall_points[method_name] = []
             continue
         
+        print(f"  Analyzing overall points for {method_name}...")
+        
         point_counter = Counter()
         point_data = {}
-        
+
         for sample_data in top_points_data:
             sample_idx = sample_data['sample_idx']
             
@@ -368,6 +448,8 @@ def saveTopOverallPoints(overall_points: Dict, output_dir: Path, top_n: int = 50
         if not points:
             continue
         
+        print(f"  Saving overall points for {method_name}...")
+        
         method_data = []
         for rank, point_info in enumerate(points, 1):
             coords = point_info['coordinates']
@@ -390,11 +472,11 @@ def saveTopOverallPoints(overall_points: Dict, output_dir: Path, top_n: int = 50
         csv_path = output_dir / f"overall_top_points_{method_name.lower()}.csv"
         method_df.to_csv(csv_path, index=False)
         
-        txt_path = output_dir / f"overall_top_points_{method_name.lower()}.txt"
+        txt_path = output_dir / f"overall_top_points_{method_name.lower()}_summary.txt"
         with open(txt_path, 'w') as f:
             f.write(f"OVERALL TOP POINTS - {method_name.upper()}\n")
             f.write("="*100 + "\n")
-            f.write(f"Showing top {top_n} most frequently occurring points across all samples\n")
+            f.write(f"Showing top {min(top_n, len(points))} most frequently occurring points across all samples\n")
             f.write("Frequency = Total number of occurrences in top N lists\n")
             f.write("Sorting: 1) Frequency (desc), 2) Max Explanation Value (desc), 3) Max Absolute Value (desc)\n")
             f.write("="*100 + "\n\n")
@@ -453,23 +535,31 @@ def main():
         raise ValueError("Number of data directories must match number of method names")
     
     print(f"{'='*80}")
-    print("XAI METHODS COMPARISON ANALYSIS")
+    print("XAI METHODS COMPARISON ANALYSIS (STREAMING VERSION)")
     print(f"{'='*80}")
     print(f"Methods to analyze: {', '.join(args.method_names)}")
     print(f"Data directories: {', '.join(str(d) for d in data_dirs)}")
     print(f"Output directory: {output_dir}")
     print(f"Top points per sample: {args.top_points}")
     print(f"Top overall points: {args.top_overall_points}")
+    print(f"Batch size: {args.batch_size}")
     print(f"Table format: {args.table_format}")
     print(f"{'='*80}\n")
     
     all_results = []
     for data_dir, method_name in zip(data_dirs, args.method_names):
+        print(f"\nAnalyzing {method_name}...")
         try:
-            results = analyzeMethod(data_dir, method_name, args.top_points)
+            results = analyzeMethodStreaming(
+                data_dir, 
+                method_name, 
+                args.top_points,
+                args.batch_size
+            )
             all_results.append(results)
+            print(f"  Completed: {results['num_analyzed']} samples processed")
         except Exception as e:
-            print(f"Error analyzing {method_name}: {e}")
+            print(f"  Error analyzing {method_name}: {e}")
             all_results.append({
                 'method_name': method_name,
                 'data_dir': str(data_dir),
@@ -480,35 +570,49 @@ def main():
                 'top_points': []
             })
     
+    print(f"\n{'='*80}")
+    print("CREATING COMPARISON TABLE")
+    print(f"{'='*80}")
     table_data, headers = createComparisonTable(all_results)
     
     comparison_df, formatted_table = saveComparisonTable(
         table_data, headers, output_dir, args.save_format, args.table_format
     )
     
+    print(formatted_table)
+    
+    # Save detailed statistics
     stats_dir = output_dir / "detailed_statistics"
     stats_dir.mkdir(exist_ok=True)
+    
+    print(f"\n{'='*80}")
+    print("SAVING DETAILED STATISTICS")
+    print(f"{'='*80}")
     
     for result in all_results:
         method_name = result['method_name']
         if result['sample_statistics']:
-            stats_df = pd.DataFrame(result['sample_statistics'])
+            stats_data = result['sample_statistics']
+            stats_df = pd.DataFrame(stats_data)
             stats_file = stats_dir / f"{method_name.lower()}_detailed_stats.csv"
             stats_df.to_csv(stats_file, index=False)
-            print(f"Detailed statistics for {method_name} saved to: {stats_file}")
+            print(f"  {method_name}: {len(stats_data)} samples saved to {stats_file}")
     
     print(f"\n{'='*80}")
     print("SAVING TOP POINTS DATA")
     print(f"{'='*80}")
-    saveTopPoints(all_results, output_dir / "top_points")
+    
+    top_points_dir = output_dir / "top_points"
+    saveTopPoints(all_results, top_points_dir)
     
     print(f"\n{'='*80}")
     print("ANALYZING OVERALL TOP POINTS BY FREQUENCY")
     print(f"{'='*80}")
     
     overall_points = findTopOverallPointsByFrequency(all_results, args.top_overall_points)
-    saveTopOverallPoints(overall_points, output_dir / "overall_points", args.top_overall_points)
-
+    overall_points_dir = output_dir / "overall_points"
+    saveTopOverallPoints(overall_points, overall_points_dir, args.top_overall_points)
+    
     print(f"\n{'='*80}")
     print("ANALYSIS COMPLETE")
     print(f"{'='*80}")
@@ -527,6 +631,15 @@ def main():
             print(f"  Mean attribution: {agg_stats['mean']['formatted']}")
             print(f"  Absolute mean: {agg_stats['abs_mean']['formatted']}")
             print(f"  Min/Max: {agg_stats['min']['formatted']} / {agg_stats['max']['formatted']}")
+    
+    print(f"\nSummary:")
+    print(f"- Total methods analyzed: {len([r for r in all_results if r['num_analyzed'] > 0])}")
+    print(f"- Total samples processed: {sum(r['num_analyzed'] for r in all_results)}")
+    print(f"- Results directory: {output_dir}")
+    print(f"  ├── comparison_table.[csv/txt/xlsx]")
+    print(f"  ├── detailed_statistics/")
+    print(f"  ├── top_points/")
+    print(f"  └── overall_points/")
 
 
 if __name__ == "__main__":
